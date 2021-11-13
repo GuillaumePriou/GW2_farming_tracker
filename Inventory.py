@@ -263,6 +263,7 @@ class Inventory:
 # Main for debug and testing
 if __name__ == "__main__":
     i = Inventory()
+    j = Inventory()
     
     # Load a key
     with open("Application_data/API_key.txt", 'r') as f:
@@ -271,12 +272,13 @@ if __name__ == "__main__":
     
     i.get_full_inventory(key)
     
-    i.save_to_file("Application_data/test_start_inventory.txt", key)
+    i.save_to_file("debug/test_start_inventory.txt", key)
     
-    i.load_from_file("Application_data/start_inventory.txt", key)
+    j.load_from_file("debug/test_start_inventory.txt", key)
     
-    print("items & count :")
-    print(i.items)
+    with open('debug/test_loaded_inventory.txt', 'w') as f:
+        json.dump(j.items, f, indent=3, ensure_ascii=False)
+
     
     
         

@@ -212,7 +212,7 @@ class View(ttk.Frame):
         
         # Define a big important message to help user to use the this application
         self.bigImportantMessageLabel = ttk.Label(self, 
-                                                  text='Bienvenue. saissisez une clé API Guild Wars 2 valide.', 
+                                                  text='Hello this is dog.', 
                                                   font='bold')
         self.bigImportantMessageLabel.grid(row=0, column=0, columnspan=2)
         

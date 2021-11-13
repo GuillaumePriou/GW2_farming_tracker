@@ -48,14 +48,20 @@ class Report:
         is discarded.
         """
         # temporary dictionnary to compute differences
-        comparison = new_inventory.items
+        comparison = new_inventory.items.copy() # Comparison now holds the newly acquired item (whatever the count)
+        print("comparison.keys() : ")
+        print(comparison.keys())
+        print("end of comparison.keys()")
         
         for k,v in old_inventory.items.items():
-            if k in comparison.keys() :
+            if k in comparison.keys() : # item exist in both inventories (whatever the count)
+                print(f'For id = {k}, comparison[k] = {comparison[k]}, old_inventory.items[k] = {old_inventory.items[k]} :')
                 comparison[k] -= old_inventory.items[k]
-            else :
-                print(k)
+                print(f'    item in both inventories => comparison[k] = {comparison[k]}')
+            else : # item exist only in old inventory => it has been removed.
+                print(f'For id = {k}, old_inventory.items[k] = {old_inventory.items[k]} :')
                 comparison[k] = - old_inventory.items[k]
+                print(f'    item only in old inventory => comparison[k] = {comparison[k]}')
 
             if comparison[k] == 0 : # Remove item if count = 0
                 del comparison[k]
@@ -76,6 +82,8 @@ class Report:
                     json.dump(old_inventory.items, f, indent=3, ensure_ascii=False)
                 with open("debug/new_inventory_according_to_comparison.txt", 'w') as f:
                     json.dump(new_inventory.items, f, indent=3, ensure_ascii=False)
+                with open("debug/comparison_result.txt", 'w') as f:
+                    json.dump(comparison, f, indent=3, ensure_ascii=False)
                     
                 raise ValueError("La comparaison a encore merdé (plus de 50 différences)...")
     
@@ -265,7 +273,4 @@ if __name__ == "__main__":
     r.itemsDetail = [{'id' : 28445, 'count' : 3}, 
                            {'id' : 12452, 'count' : 2}]
     r.get_item_details()
-    print(f'r.totalAquisitionValue = {r.totalAquisitionValue}')
-    print(f'r.totalLiquidGoldValue = {r.totalLiquidGoldValue}')
-    print(f'r.itemsDetail = {r.itemsDetail}')
     
