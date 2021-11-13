@@ -1,3 +1,6 @@
+# GW2 farming tracker specific : Do not track user setting.
+Application_data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
