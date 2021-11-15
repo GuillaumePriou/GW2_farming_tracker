@@ -5,62 +5,85 @@ View layer of GW2 tool to evaluate gold earnings.
 @author: Krashnark
 """
 import tkinter as tk
-from importlib import resources
+from importlib import abc, resources
 from tkinter import ttk
+from typing import ClassVar
 
 from PIL import Image, ImageTk
 
-ASSETS = resources.files("gw2_tracker.assets")
-ASSET_GOLD = ASSETS.joinpath("gold_coin_20px.png")
-ASSET_SILVER = ASSETS.joinpath("silver_coin_20px.png")
-ASSET_COPPER = ASSETS.joinpath("copper_coin_20px.png")
+ASSET_SOURCES = resources.files("gw2_tracker").joinpath("assets")
+
+ASSETS = {
+    k: ASSET_SOURCES.joinpath(f"{k}_coin_20px.png")
+    for k in ("copper", "silver", "gold")
+}
+
+
+class CoinWidget(ttk.Frame):
+    """Widget displaying a single coin"""
+
+    IMAGE_CACHE: ClassVar[dict[abc.Traversable, tk.PhotoImage]] = {}
+
+    label: ttk.Label
+    logo: ttk.Label
+
+    def __init__(self, parent, asset: abc.Traversable, amount: int = 0):
+        """
+        Parameters:
+            parent: parent widget
+            asset: asset to display after the amount
+        """
+        super().__init__(parent)
+
+        if asset not in self.IMAGE_CACHE:
+            self.IMAGE_CACHE[asset] = tk.PhotoImage(data=asset.read_bytes())
+
+        self.label = ttk.Label(self, text="-")
+        self.logo = ttk.Label(self, image=self.IMAGE_CACHE[asset])
+
+        self.label.pack(side="left")
+        self.logo.pack(side="left")
+
+        self.amount = amount
+
+    @property
+    def amount(self) -> int:
+        return self._amount
+
+    @amount.setter
+    def amount(self, value: int):
+        self._amount = value
+        self.label.config(text=self._amount)
 
 
 class GoldWidget(ttk.Frame):
-    """Gold widget to display properly any gold value"""
+    copper: CoinWidget
+    silver: CoinWidget
+    gold: CoinWidget
 
-    def __init__(self, parent, currency_value=0):
+    def __init__(self, parent, amount=0):
         super().__init__(parent)
 
-        self.gold = int(currency_value / 10000)
-        self.silver = int(currency_value / 100) - self.gold * 100
-        self.copper = currency_value - self.gold * 10000 - self.silver * 100
+        self.copper = CoinWidget(self, ASSETS["copper"])
+        self.silver = CoinWidget(self, ASSETS["silver"])
+        self.gold = CoinWidget(self, ASSETS["gold"])
 
-        # Gold number & logo
-        self.goldLabelNumber = ttk.Label(self, text=self.gold)
-        self.goldLabelNumber.pack(side="left")
+        self.gold.pack(side="left")
+        self.silver.pack(side="left")
+        self.copper.pack(side="left")
 
-        self.goldLogo = tk.PhotoImage(data=ASSET_GOLD.read_bytes())
-        self.goldLogoLabel = ttk.Label(self, image=self.goldLogo)
-        self.goldLogoLabel.pack(side="left")
+        self.amount = amount
 
-        # Silver number & logo
-        self.silverLabelNumber = ttk.Label(self, text=self.silver)
-        self.silverLabelNumber.pack(side="left")
+    @property
+    def amount(self) -> int:
+        return self._amount
 
-        self.silverLogo = tk.PhotoImage(data=ASSET_SILVER.read_bytes())
-        self.silverLogoLabel = ttk.Label(self, image=self.silverLogo)
-        self.silverLogoLabel.pack(side="left")
-
-        # Copper number & logo
-        self.copperLabelNumber = ttk.Label(self, text=self.copper)
-        self.copperLabelNumber.pack(side="left")
-
-        self.copperLogo = tk.PhotoImage(data=ASSET_COPPER.read_bytes())
-        self.copperLogoLabel = ttk.Label(self, image=self.copperLogo)
-        self.copperLogoLabel.pack(side="left")
-
-    def setValue(self, new_value):
-        """Update the value displayed by the widget.
-        Input : the new value to display
-        """
-        self.gold = int(new_value / 10000)
-        self.silver = int(new_value / 100) - self.gold * 100
-        self.copper = new_value - self.gold * 10000 - self.silver * 100
-
-        self.goldLabelNumber.config(text=self.gold)
-        self.silverLabelNumber.config(text=self.silver)
-        self.copperLabelNumber.config(text=self.copper)
+    @amount.setter
+    def amount(self, value: int):
+        self._amount = value
+        self.copper.amount = value % 100
+        self.silver.amount = (value // 100) % 100
+        self.gold.amount = value // 10000
 
 
 class DetailsReportDisplay(ttk.Frame):

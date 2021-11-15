@@ -6,8 +6,11 @@ from hypothesis import given, strategies as st
 
 @given(st.dictionaries(keys=st.text(printable), values=st.integers()))
 def test_inventory_serialization(content):
-    inv = inventory.Inventory(items=content)
-    with tempfile.NamedTemporaryFile(mode="wt+") as f:
-        inv.save_to_file(f.name, "")
+    inv = inventory.Inventory(content)
+    
+    assert inv == inventory.Inventory(inv.to_json())
+
+    with tempfile.TemporaryFile(mode="wt+") as f:
+        inv.to_file(f)
         f.seek(0)
-        assert inv == inventory.Inventory.load_from_file(f.name, "")
+        assert inv == inventory.Inventory.from_file(f)

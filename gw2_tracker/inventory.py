@@ -8,21 +8,122 @@ Main features :
 
 @author: Krashnark
 """
+from __future__ import annotations
+
+import functools
 import json
 import threading
 import types
+from collections import abc
 from dataclasses import dataclass, field
-from typing import Mapping
+from pathlib import Path
+from typing import IO, Mapping
 
 from gw2_tracker import gw2_api
 
 
 @dataclass(frozen=True)
-class Inventory:
-    items: Mapping[str, int] = field(default_factory=dict)
+class Inventory(abc.Mapping[str, int]):
+    """
+    Immutable mapping from string ID to non-zero amounts
+
+    Includes utility methods such as comparisons, serialization
+    and addition/substraction. Inventory object can be compared to int
+    and to themselves. Comparison to int is equivalent to comparing
+    all values to the int. Comparison to another inventory compares the keys
+    as sets and the values one-by-one. This is performed by checking the
+    difference of the compared set to 0.
+    """
+    content: Mapping[str, int] = field(default_factory=dict)
+
+    @classmethod
+    def from_file(cls, file: str | Path | IO[bytes | str]) -> Inventory:
+        if hasattr(file, "read"):
+            content = json.loads(file.read())
+        else:
+            with Path(file).open("rt", encoding="utf-8") as f:
+                content = json.load(f)
+        if not (
+            isinstance(content, dict)
+            and all(
+                isinstance(k, str) and isinstance(v, int) for k, v in content.items()
+            )
+        ):
+            raise ValueError(
+                f"json file should containt an dict[str, int], got {content}"
+            )
+        return Inventory(content)
 
     def __post_init__(self):
-        self.__dict__["items"] = types.MappingProxyType(self.__dict__["items"])
+        self.__dict__["content"] = types.MappingProxyType(
+            {k: v for k, v in self.content.items() if v}
+        )
+
+    def __getitem__(self, key: str) -> int:
+        return self.content[key]
+
+    def __len__(self) -> int:
+        return len(self.content)
+
+    def __iter__(self) -> abc.Iterator[str]:
+        return iter(self.content)
+
+    def __add__(self, other: Inventory) -> Inventory:
+        if isinstance(other, Inventory):
+            return Inventory({
+                k: self.get(k, 0) + other.get(k, 0) for k in self.keys() | other.keys()
+            })
+        return NotImplemented
+
+    def __sub__(self, other: Inventory) -> Inventory:
+        if isinstance(other, Inventory):
+            return Inventory({
+                k: self.get(k, 0) - other.get(k, 0) for k in self.keys() | other.keys()
+            })
+        return NotImplemented
+
+    def __lt__(self, other: int | Inventory) -> bool:
+        if isinstance(other, int):
+            return all(v < other for v in self.values())
+        elif isinstance(other, Inventory):
+            diff = other - self
+            return diff and diff > 0
+        return NotImplemented
+
+    def __le__(self, other: int | Inventory) -> bool:
+        if isinstance(other, int):
+            return all(v <= other for v in self.values())
+        elif isinstance(other, Inventory):
+            return (other - self) >= 0
+        return NotImplemented
+
+    def __ge__(self, other: int | Inventory) -> bool:
+        if isinstance(other, int):
+            return all(v >= other for v in self.values())
+        elif isinstance(other, Inventory):
+            return (self - other) >= 0
+        return NotImplemented
+
+    def __gt__(self, other: int | Inventory) -> bool:
+        if isinstance(other, int):
+            return all(v > other for v in self.values())
+        elif isinstance(other, Inventory):
+            diff = self - other
+            return diff and diff > 0
+
+    def to_json(self) -> dict[str, int]:
+        return dict(self.content)
+
+    def to_file(self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs):
+        kwargs = kwargs | dict(indent=indent, sort_keys=sort_keys)
+        content = self.to_json()
+        if hasattr(file, "write"):
+            json.dump(content, file, **kwargs)
+        else:
+            with Path(file).open("wt", encoding="utf-8") as fp:
+                json.dump(content, fp, **kwargs)
+
+    ## Old API - Remove
 
     @classmethod
     def load_from_file(cls, source_file, api_key_to_match):
@@ -295,22 +396,3 @@ class Inventory:
                 self.items[item[0]] = item[1]
 
         print("Data aggregated. Inventory fetch complete.")
-
-
-# Main for debug and testing
-if __name__ == "__main__":
-    i = Inventory()
-    j = Inventory()
-
-    # Load a key
-    with open("Application_data/API_key.txt", "r") as f:
-        key = f.read()
-
-    i.get_full_inventory(key)
-
-    i.save_to_file("debug/test_start_inventory.txt", key)
-
-    j.load_from_file("debug/test_start_inventory.txt", key)
-
-    with open("debug/test_loaded_inventory.txt", "w") as f:
-        json.dump(j.items, f, indent=3, ensure_ascii=False)
