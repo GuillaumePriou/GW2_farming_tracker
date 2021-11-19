@@ -7,7 +7,7 @@ View layer of GW2 tool to evaluate gold earnings.
 import tkinter as tk
 from importlib import abc, resources
 from tkinter import ttk
-from typing import ClassVar
+from typing import Any, ClassVar, Literal
 
 from PIL import Image, ImageTk
 
@@ -17,6 +17,70 @@ ASSETS = {
     k: ASSET_SOURCES.joinpath(f"{k}_coin_20px.png")
     for k in ("copper", "silver", "gold")
 }
+
+
+class ScrollableFrame(ttk.Frame):
+    """
+    Frame automatically embedded in a Canvas with a scrollbar
+
+    This widget first creates a `tk.Canvas` with an attached `ttk.Scrollbar`
+    on it before adding itself as a window of the canvas. It should make adding
+    a scrollbar to a frame transparent.
+
+    Parameters:
+        parent: parent widget to create this frame in. This is not the actual
+            parent of this widget, see the ``canvas`` attribute.
+        orient: orientation of the scrollbar
+
+    Attributes:
+        canvas: the automatically created canvas that is the parent of this
+            widget. The parent of the canvas is the ``parent`` passed when
+            initializing the `ScrollableFrame`.
+        scrollbar: scrollbar of the ``canvas`` attribute
+
+    See also:
+        ttk.Frame
+    """
+
+    canvas: tk.Canvas
+    scrollbar: ttk.Scrollbar
+
+    def __init__(
+        self,
+        parent,
+        *,
+        orient: Literal["vertical", "horizontal"] = "vertical",
+        canvas_kws: dict[str, Any] = None,
+        scrollbar_kws: dict[str, Any] = None,
+        **kwargs,
+    ):
+        # Create a Canvas between this frame and its parent and add a scrollbar
+        self.canvas = tk.Canvas(parent, **(canvas_kws or {}))
+        self.scrollbar = ttk.Scrollbar(
+            self.canvas, orient=orient, **(scrollbar_kws or {})
+        )
+        if orient == "vertical":
+            self.scrollbar.configure(command=self.canvas.yview)
+            self.canvas.configure(yscrollcommand=self.scrollbar.set)
+            self.scrollbar.pack(side="right", fill="y")
+        elif orient == "horizontal":
+            self.scrollbar.configure(command=self.canvas.xview)
+            self.canvas.configure(xscrollcommand=self.scrollbar.set)
+            self.scrollbar.pack(side="bottom", fill="x")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        # Actually initialise the frame and display it in the canvas
+        super().__init__(self.canvas, **kwargs)
+        self.canvas.create_window(
+            0, 0, window=self, anchor="nw", tags="scrollable_frame"
+        )
+        self.bind("<Configure>", self._on_configure)
+
+    def _on_configure(self, event):
+        """
+        Adapts the canvas when the frame is resized
+        """
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
 
 class CoinWidget(ttk.Frame):
