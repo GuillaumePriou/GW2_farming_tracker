@@ -1,7 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
+
 from PIL import Image, ImageTk
-        
+
 # Main for debug
 if __name__ == "__main__":
     root = tk.Tk()
@@ -39,9 +40,9 @@ if __name__ == "__main__":
     a.grid()
     """
     item = dict()
-    item['id'] = 12134
-    print("Download/" + str(item['id']) + ".png")
-    image = Image.open("Download/" + str(item['id']) + ".png")
+    item["id"] = 12134
+    print("Download/" + str(item["id"]) + ".png")
+    image = Image.open("Download/" + str(item["id"]) + ".png")
     photoImage = ImageTk.PhotoImage(image)
     iconLabel = ttk.Label(root, image=photoImage)
     iconLabel.image = photoImage

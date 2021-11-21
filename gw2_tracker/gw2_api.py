@@ -15,22 +15,18 @@ Main features :
 @author: Krashnark
 """
 import asyncio
-import functools
-import os
-import threading
-from asyncio.events import AbstractEventLoop
-from typing import Any, Final, NewType, Type, TypeAlias, TypedDict, TypeVar
+from typing import Any, Final, NewType, TypeAlias, TypedDict, TypeVar
 
-import aiohttp
+import asks
 import requests
+import trio
 from attr import define
 
-from gw2_tracker.inventory import Inventory, Snapshot
+from gw2_tracker.inventory import APIKey, Inventory, Snapshot
 from gw2_tracker.utils import autoformat
 
 # Types aliases
 T = TypeVar("T")
-APIKey: TypeAlias = NewType("APIKey", str)
 URL: TypeAlias = NewType("URL", str)
 Token: TypeAlias = NewType("Token", object)
 
@@ -103,52 +99,6 @@ class KeyPermissionError(APIKeyError):
     msg: str = "API Key {key} does not have the required permissions {missing_perms}"
 
 
-class AsyncIOThread(threading.Thread):
-    """
-    Thread running an asyncio event loop
-
-    This thread defaults to being a daemon thread. You should use the
-    ``new`` method to create a new instance of this class without manually
-    passing an asyncio loop.
-
-    Parameters:
-        loop: asyncio loop to run in another thread. It must have been created
-            in the main thread with `asyncio.new_event_loop`
-        group: passed to `threading.Thread` constructor
-        name: passed to `threading.Thread` constructor
-        daemon: passed to `threading.Thread` constructor
-    """
-
-    loop: asyncio.AbstractEventLoop
-
-    @classmethod
-    def new(cls: Type[T], **kwargs) -> T:
-        """
-        Creates a new asyncio event loop and associated AsyncIOThread
-        """
-        if threading.current_thread() is not threading.main_thread():
-            raise RuntimeError("Can only start an asyncio thread from the main thread")
-        loop = asyncio.new_event_loop()
-        return cls(loop, **kwargs)
-
-    def __init__(
-        self, loop: asyncio.AbstractEventLoop, *, group=None, name=None, daemon=True
-    ):
-        super().__init__(group=group, name=name, daemon=daemon)
-        self.loop = loop
-
-    def run(self):
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
-
-    @functools.wraps(AbstractEventLoop.call_soon_threadsafe)
-    def call_soon(self, callback, *args):
-        """
-        Schedule a callback to be run by asyncio in this thread
-        """
-        self.loop.call_soon_threadsafe(callback, *args)
-
-
 def get_headers(key: APIKey) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
@@ -200,34 +150,32 @@ def unwrap_slot(slot: Slot) -> tuple[str, int]:
     return slot["id"], count
 
 
-async def call_api(session: aiohttp.ClientSession, url: URL, key: APIKey) -> Any:
+async def call_api(session: asks.Session, url: URL, key: APIKey) -> Any:
     headers = get_headers(key)
-    async with session.get(url, headers=headers) as response:
-        if response.status == HTTP_OK:
-            return await response.json()
-        else:
-            raise GW2APIError(f"Could not reach {url}: {response}")
+    response = session.get(url, headers=headers)
+    if response.status == HTTP_OK:
+        return await response.json()
+    else:
+        raise GW2APIError(f"Could not reach {url}: {response}")
 
 
-async def get_account_inventory(
-    session: aiohttp.ClientSession, key: APIKey
-) -> Inventory:
+async def get_account_inventory(session: asks.Session, key: APIKey) -> Inventory:
     slots: list[Slot] = await call_api(session, URL_ACCOUNT_INVENTORY, key)
     return Inventory(dict(map(unwrap_slot, slots)))
 
 
-async def get_bank_inventory(session: aiohttp.ClientSession, key: APIKey) -> Inventory:
+async def get_bank_inventory(session: asks.Session, key: APIKey) -> Inventory:
     slots: list[Slot] = await call_api(session, URL_BANK_INVENTORY, key)
     return Inventory(dict(map(unwrap_slot, slots)))
 
 
-async def get_bank_materials(session: aiohttp.ClientSession, key: APIKey) -> Inventory:
+async def get_bank_materials(session: asks.Session, key: APIKey) -> Inventory:
     slots: list[Slot] = await call_api(session, URL_BANK_MATERIALS, key)
     return Inventory(dict(map(unwrap_slot, slots)))
 
 
 async def get_character_inventory(
-    session: aiohttp.ClientSession, key: APIKey, character: str
+    session: asks.Session, key: APIKey, character: str
 ) -> Inventory:
     # TODO: manually encode character name or aiohttp does it ?
     url = URL(URL_CHARACTER_INVENTORY_TPL.format(character=character))
@@ -238,9 +186,7 @@ async def get_character_inventory(
     )
 
 
-async def get_characters_inventories(
-    session: aiohttp.ClientSession, key: APIKey
-) -> Inventory:
+async def get_characters_inventories(session: asks.Session, key: APIKey) -> Inventory:
     character_names: list[str] = await call_api(session, URL_CHARACTER_LIST, key)
     inventories = await asyncio.gather(
         *(
@@ -251,9 +197,7 @@ async def get_characters_inventories(
     return sum(inventories, start=Inventory())
 
 
-async def get_aggregated_inventory(
-    session: aiohttp.ClientSession, key: APIKey
-) -> Inventory:
+async def get_aggregated_inventory(session: asks.Session, key: APIKey) -> Inventory:
     inventories = await asyncio.gather(
         *(
             coro(session, key)
@@ -266,6 +210,35 @@ async def get_aggregated_inventory(
         )
     )
     return sum(inventories, start=Inventory())
+
+
+async def get_snapshot(session: asks.Session, key: APIKey):
+    return Snapshot(key=key, inventory=await get_aggregated_inventory(session, key))
+
+
+class GW2API:
+    started: bool = False
+    nursery: trio.Nursery
+    session: asks.Session
+
+    async def main(self):
+        """
+        Main trio routine to call from an host
+        """
+        self.session = asks.Session(connections=20)
+        async with trio.open_nursery() as nursery:
+            self.nursery = nursery
+            self.started = True
+            await trio.sleep_forever()
+
+    def make_snapshot(self, controller, key: APIKey):
+        if not self.started:
+            raise RuntimeError(f"{self} is not started")
+        self.nursery.start_soon(self._make_snapshot, controller, key)
+
+    async def _make_snapshot(self, controller, key: APIKey):
+        snapshot = await get_snapshot(self.session, key)
+        controller.notify_new_snapshot(key, snapshot)
 
 
 def GW2_API_handler(url, api_key=""):

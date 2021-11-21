@@ -300,8 +300,11 @@ class FullReportDisplay(ttk.Frame):
         self.details.grid(row=1, column=0, columnspan=3)
 
 
-class View(ttk.Frame):
+class TkView:
     def __init__(self, parent):
+        # todo: integrate this code
+        self.title("GW2 farming tracker")
+
         super().__init__(parent)
 
         # Define a big important message to help user to use the this application

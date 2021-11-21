@@ -5,6 +5,10 @@ View layer of GW2 tool to evaluate gold earnings.
 @author: Krashnark
 """
 
+from typing import Any, Callable, Protocol
+
+import outcome
+
 
 class Controller:
     def __init__(self, model, view):

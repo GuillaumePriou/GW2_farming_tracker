@@ -1,6 +1,3 @@
-
-
-
 # m = Model()
 # m.set_reference_inventory()
 
