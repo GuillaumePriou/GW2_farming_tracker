@@ -15,7 +15,7 @@ import attr
 import outcome
 from PIL import Image, ImageTk
 
-from gw2_tracker import protocols
+from gw2_tracker import protocols, report
 
 ASSET_SOURCES = resources.files("gw2_tracker").joinpath("assets")
 
@@ -299,34 +299,34 @@ class FullReportDisplay(ttk.Frame):
         - Liquid gold value
     """
 
-    def __init__(self, parent, report_to_display=None):
+    def __init__(self, parent, report_to_display: report.Report = None):
         super().__init__(parent)
         # self.farmTimeLabel = ttk.Label(text='Durée : à calculer')
         # self.farmTimeLabel.grid(row=0, column=0)
 
         # Total aquisition price display
-        self.totalAcquisitionvalueLabel = ttk.Label(self, text="Prix à l'achat")
-        self.totalAcquisitionvalueLabel.grid(row=0, column=0)
+        self.label_tot_aquisition = ttk.Label(self, text="Prix à l'achat")
+        self.label_tot_aquisition.grid(row=0, column=0)
 
         if report_to_display == None:
-            self.totalAquisitionGoldwidget = GoldWidget(self, 0)
+            self.gold_tot_aquisition = GoldWidget(self, 0)
         else:
-            self.totalAquisitionGoldwidget = GoldWidget(
+            self.gold_tot_aquisition = GoldWidget(
                 self, report_to_display.totalAquisitionValue
             )
-        self.totalAquisitionGoldwidget.grid(row=0, column=1)
+        self.gold_tot_aquisition.grid(row=0, column=1)
 
         # Total liquid gold price display
-        self.totalLiquidGoldValueLabel = ttk.Label(self, text="Prix liquid gold")
-        self.totalLiquidGoldValueLabel.grid(row=0, column=2)
+        self.label_tot_liquid = ttk.Label(self, text="Prix liquid gold")
+        self.label_tot_liquid.grid(row=0, column=2)
 
         if report_to_display == None:
-            self.totalLiquidGoldGoldwidget = GoldWidget(self, 0)
+            self.gold_tot_liquid = GoldWidget(self, 0)
         else:
-            self.totalLiquidGoldGoldwidget = GoldWidget(
+            self.gold_tot_liquid = GoldWidget(
                 self, report_to_display.totalLiquidGoldValue
             )
-        self.totalLiquidGoldGoldwidget.grid(row=0, column=3)
+        self.gold_tot_liquid.grid(row=0, column=3)
 
         if report_to_display == None:
             self.details = DetailsReportDisplay(self, [])
@@ -338,7 +338,7 @@ class FullReportDisplay(ttk.Frame):
         # print(f'report_to_display.totalLiquidGoldValue = {report_to_display.totalLiquidGoldValue}')
         # print(f'report_to_display.itemsDetail = {report_to_display.itemsDetail}')
 
-    def update_detail_display(self, new_report):
+    def update_detail_display(self, new_report: report.Report):
         # re-init with new value
         self.details.destroy()
         self.details = DetailsReportDisplay(self, new_report.itemsDetail)
@@ -347,43 +347,41 @@ class FullReportDisplay(ttk.Frame):
 
 class TkView(protocols.ViewProto):
     root: tk.Tk
+    controller: None | protocols.ControllerProto
 
     def __init__(self):
         self.root = tk.Tk()
-        # todo: integrate this code
-        self.title("GW2 farming tracker")
-
-        super().__init__(parent)
+        self.root.title("GW2 farming tracker")
 
         # Define a big important message to help user to use the this application
-        self.bigImportantMessageLabel = ttk.Label(
-            self, text="Hello this is dog.", font="bold"
+        self.label_main_message = ttk.Label(
+            self.root, text="Hello this is dog.", font="bold"
         )
-        self.bigImportantMessageLabel.grid(row=0, column=0, columnspan=2)
+        self.label_main_message.grid(row=0, column=0, columnspan=2)
 
         # Entry widget where the user paste his API key
-        self.keyInput = ttk.Entry(self, width=80)
-        self.keyInput.grid(row=2, column=0)
+        self.input_key = ttk.Entry(self.root, width=80)
+        self.input_key.grid(row=2, column=0)
 
-        self.okButton = ttk.Button(
-            self, text="Utiliser cette clé !", command=self.save_key
+        self.button_ok = ttk.Button(
+            self.root, text="Utiliser cette clé !", command=self.save_key
         )
-        self.okButton.grid(row=2, column=2)
+        self.button_ok.grid(row=2, column=2)
 
         # Buttons to get inventories and calculate differences
 
-        self.startButton = ttk.Button(
-            self, text="Commencer", command=self.set_reference
+        self.button_start = ttk.Button(
+            self.root, text="Commencer", command=self.set_reference
         )
-        self.startButton.grid(row=4, column=0)
+        self.button_start.grid(row=4, column=0)
 
-        self.stopButton = ttk.Button(
-            self, text="Calculer les gains", command=self.compute_gains
+        self.button_stop = ttk.Button(
+            self.root, text="Calculer les gains", command=self.compute_gains
         )
-        self.stopButton.grid(row=4, column=1)
+        self.button_stop.grid(row=4, column=1)
 
-        self.fullReportDisplay = FullReportDisplay(self)
-        self.fullReportDisplay.grid(row=5, column=0, columnspan=3)
+        self.display_report = FullReportDisplay(self.root)
+        self.display_report.grid(row=5, column=0, columnspan=3)
 
     def get_trio_host(self) -> TkTrioHost:
         return TkTrioHost(self.root)
@@ -392,28 +390,28 @@ class TkView(protocols.ViewProto):
         self.controller = controller
 
     def refresh_api_key_entry_content(self, value_from_model):
-        self.keyInput.insert(0, value_from_model)
+        self.input_key.insert(0, value_from_model)
 
     # Some functions to update message of big important message label
     def show_action_in_progress(self, msg):  # Does
         print("yellow !!")
-        self.bigImportantMessageLabel.config(text=msg)
-        self.bigImportantMessageLabel["foreground"] = "yellow"
+        self.label_main_message.config(text=msg)
+        self.label_main_message["foreground"] = "yellow"
 
     def show_success(self, msg):
-        self.bigImportantMessageLabel["text"] = msg
-        self.bigImportantMessageLabel["foreground"] = "green"
+        self.label_main_message["text"] = msg
+        self.label_main_message["foreground"] = "green"
 
     def show_error(self, msg):
-        self.bigImportantMessageLabel["text"] = msg
-        self.bigImportantMessageLabel["foreground"] = "red"
+        self.label_main_message["text"] = msg
+        self.label_main_message["foreground"] = "red"
 
     # API key input management
     def save_key(self):
         print("Cliqué sur le bouton save api key")
         self.show_action_in_progress("Vérification de la clé...")
         if self.controller:
-            self.controller.save_api_key(self.keyInput.get())
+            self.controller.save_api_key(self.input_key.get())
 
     # Reference  inventory fetch management
     def set_reference(self):
@@ -427,7 +425,7 @@ class TkView(protocols.ViewProto):
         # self.report = ReportDisplay(self.controller.compute_gains())
         # self.report.grid(row=5, column=0, columnspan=5)
 
-    def display_report(self, report):
+    def show_report(self, report):
         print("View : begin report display")
-        self.fullReportDisplay.update_detail_display(report)
+        self.show_report.update_detail_display(report)
         print("View : end report display")
