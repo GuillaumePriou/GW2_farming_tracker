@@ -5,9 +5,33 @@ View layer of GW2 tool to evaluate gold earnings.
 @author: Krashnark
 """
 
-from typing import Any, Callable, Protocol
+import asks
+import trio
 
-import outcome
+from gw2_tracker import protocols
+
+
+class TrioGuest:
+    started: bool = False
+    nursery: trio.Nursery
+    session: asks.Session
+
+    def start(self, host: protocols.TrioHostProto):
+        trio.lowlevel.start_guest_run(
+            self._main,
+            run_sync_soon_not_threadsafe=host.run_sync_soon_not_threadsafe,
+            run_sync_soon_threadsafe=host.run_sync_soon_threadsafe,
+            done_callback=host.done_callback,
+            # TODO: change this if tkinter use it
+            host_uses_signal_set_wakeup_fd=host.uses_signal_set_wakeup_fd,
+        )
+
+    async def _main(self):
+        self.session = asks.Session(connections=20)
+        async with trio.open_nursery() as nursery:
+            self.nursery = nursery
+            self.started = True
+            await trio.sleep_forever()
 
 
 class Controller:

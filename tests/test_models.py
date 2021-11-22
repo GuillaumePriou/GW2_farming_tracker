@@ -1,7 +1,8 @@
 import tempfile
 from string import printable
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from gw2_tracker import models
 

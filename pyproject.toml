@@ -15,6 +15,8 @@ attrs = "^21.2.0"
 trio = "^0.19.0"
 asks = "^2.4.12"
 outcome = "^1.1.0"
+appdirs = "^1.4.4"
+yarl = "^1.7.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"

@@ -182,6 +182,7 @@ class Inventory(abc.Mapping[str, int]):
 class Snapshot:
     key: APIKey
     inventory: Inventory
+    wallet: Inventory
     datetime: DateTime = field(factory=pendulum.now)
     name: None | str = None
 
@@ -226,12 +227,9 @@ class Snapshot:
             raise ValueError(f"expected a JSON object, got {obj}")
 
         fields = utils.unjsonize(cls, obj)
-        return Snapshot(
-            key=APIKey(fields["key"]),
-            inventory=fields["inventory"],
-            datetime=typing.cast(DateTime, pendulum.parser.parse(fields["datetime"])),
-            name=fields.get("name"),
-        )
+        fields["key"] = APIKey(fields["key"])
+        fields["datetime"] = DateTime, pendulum.parser.parse(fields["datetime"])
+        return Snapshot(**fields)
 
     def to_json(self) -> utils.JsonObject:
         """Serialize the instance to JSON"""
@@ -258,7 +256,7 @@ class Snapshot:
 
 
 @mutable
-class Model:
+class _Model:
     """
     Save the application state
     """
@@ -268,7 +266,7 @@ class Model:
     data: dict[APIKey, list[Snapshot]] = field(factory=dict)
 
     @classmethod
-    def from_file(cls, filepath: str | Path) -> Model:
+    def from_file(cls, filepath: str | Path) -> _Model:
         """
         Deserialize a model from a file and make the model save itself
         to this file
@@ -282,7 +280,7 @@ class Model:
             raise ValueError(f"{filepath} does not contain a json object")
 
         fields = utils.unjsonize(cls, obj, ignore=["filepath"])
-        return Model(filepath=filepath, **fields)
+        return _Model(filepath=filepath, **fields)
 
     def save(self):
         """Save the model to the given file"""
@@ -291,104 +289,104 @@ class Model:
             json.dump(obj, file)
 
 
-# class Model:
-#     def __init__(self, api_key=""):
-#         """
-#         Model initialization.
+class Model:
+    def __init__(self, api_key=""):
+        """
+        Model initialization.
 
-#         self.applicationState possible values :
-#             - "0 - started"
-#             - "1 - got api key"
-#             - "2 - got start inventory"
-#             - "3 - got end inventory"
-#             - "4 - got full report"
-#         """
-#         self.applicationState = "0 - started"
-#         self.apiKey = (
-#             gw2_api.APIKey()
-#         )  # Declare API key, try to load a previously saved API key
-#         self.referenceInventory = Inventory()
-#         self.newInventory = Inventory()
-#         self.report = report.Report()
+        self.applicationState possible values :
+            - "0 - started"
+            - "1 - got api key"
+            - "2 - got start inventory"
+            - "3 - got end inventory"
+            - "4 - got full report"
+        """
+        self.applicationState = "0 - started"
+        self.apiKey = (
+            gw2_api.APIKey()
+        )  # Declare API key, try to load a previously saved API key
+        self.referenceInventory = Inventory()
+        self.newInventory = Inventory()
+        self.report = report.Report()
 
-#         if self.apiKey.keyValue != "":
-#             self.applicationState = "1 - got api key"
+        if self.apiKey.keyValue != "":
+            self.applicationState = "1 - got api key"
 
-#         if self.applicationState == "1 - got api key":
-#             # Try to load saved reference inventory
-#             if os.path.isfile("Application_data/start_inventory.txt"):
-#                 self.referenceInventory.load_from_file(
-#                     "Application_data/start_inventory.txt", self.apiKey.keyValue
-#                 )
-#                 self.applicationState = "2 - got start inventory"
-#             else:
-#                 print("Could not find saved and valid reference inventory.")
+        if self.applicationState == "1 - got api key":
+            # Try to load saved reference inventory
+            if os.path.isfile("Application_data/start_inventory.txt"):
+                self.referenceInventory.load_from_file(
+                    "Application_data/start_inventory.txt", self.apiKey.keyValue
+                )
+                self.applicationState = "2 - got start inventory"
+            else:
+                print("Could not find saved and valid reference inventory.")
 
-#         # This loading do not make sense without loading the full report
-#         # if self.applicationState == "2 - got start inventory" :
-#         #     # try to load target inventory
-#         #     try:
-#         #         self.referenceInventory.load_from_file("Application_data/end_inventory.txt", self.apiKey)
-#         #         self.applicationState = "3 - got end inventory"
-#         #     except ValueError as error :
-#         #         print ("Could not find saved and valid reference inventory.")
-#         #         print (error)
+        # This loading do not make sense without loading the full report
+        # if self.applicationState == "2 - got start inventory" :
+        #     # try to load target inventory
+        #     try:
+        #         self.referenceInventory.load_from_file("Application_data/end_inventory.txt", self.apiKey)
+        #         self.applicationState = "3 - got end inventory"
+        #     except ValueError as error :
+        #         print ("Could not find saved and valid reference inventory.")
+        #         print (error)
 
-#         # Maybe will implement load function for report.
-#         # Maybe...
+        # Maybe will implement load function for report.
+        # Maybe...
 
-#     def set_new_key(self, new_key):
-#         """User set a new key. Let's validate it and save it."""
-#         try:
-#             self.apiKey.keyValue = new_key
-#             self.applicationState = "1 - got api key"
-#         except:
-#             pass
+    def set_new_key(self, new_key):
+        """User set a new key. Let's validate it and save it."""
+        try:
+            self.apiKey.keyValue = new_key
+            self.applicationState = "1 - got api key"
+        except:
+            pass
 
-#     def set_reference_inventory(self):
-#         """Get full inventory of an account and put it in reference inventory"""
-#         if self.applicationState == "0 - started":
-#             raise ValueError("Key was not yet defined !")
+    def set_reference_inventory(self):
+        """Get full inventory of an account and put it in reference inventory"""
+        if self.applicationState == "0 - started":
+            raise ValueError("Key was not yet defined !")
 
-#         self.referenceInventory.get_full_inventory(self.apiKey.keyValue)
+        self.referenceInventory.get_full_inventory(self.apiKey.keyValue)
 
-#         self.referenceInventory.save_to_file(
-#             "Application_data/start_inventory.txt", self.apiKey.keyValue
-#         )
+        self.referenceInventory.save_to_file(
+            "Application_data/start_inventory.txt", self.apiKey.keyValue
+        )
 
-#         self.applicationState = "2 - got start inventory"
+        self.applicationState = "2 - got start inventory"
 
-#         # with open("debug/reference_inventory.txt", 'w') as f:
-#         #     json.dump(self.referenceInventory.items, f, indent=3, ensure_ascii=False)
+        # with open("debug/reference_inventory.txt", 'w') as f:
+        #     json.dump(self.referenceInventory.items, f, indent=3, ensure_ascii=False)
 
-#     def get_inventory_and_compare_it(self):
-#         """
-#         Get full inventory of an account and put it in new/updated inventory.
-#         Then compare reference inventory with new inventory and build the report.
-#         """
-#         if self.applicationState in ("0 - started", "1 - got api key"):
-#             raise ValueError("Missing key or reference inventory !")
-#         self.newInventory.get_full_inventory(self.apiKey.keyValue)
+    def get_inventory_and_compare_it(self):
+        """
+        Get full inventory of an account and put it in new/updated inventory.
+        Then compare reference inventory with new inventory and build the report.
+        """
+        if self.applicationState in ("0 - started", "1 - got api key"):
+            raise ValueError("Missing key or reference inventory !")
+        self.newInventory.get_full_inventory(self.apiKey.keyValue)
 
-#         self.referenceInventory.save_to_file(
-#             "Application_data/end_inventory.txt", self.apiKey.keyValue
-#         )
-#         self.applicationState = "3 - got end inventory"
-#         self.report.compare_inventories(self.referenceInventory, self.newInventory)
+        self.referenceInventory.save_to_file(
+            "Application_data/end_inventory.txt", self.apiKey.keyValue
+        )
+        self.applicationState = "3 - got end inventory"
+        self.report.compare_inventories(self.referenceInventory, self.newInventory)
 
-#         print(
-#             f"function get inventory & compare it : report content after comparison :"
-#         )
-#         print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
+        print(
+            f"function get inventory & compare it : report content after comparison :"
+        )
+        print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
 
-#         self.report.get_item_details()
+        self.report.get_item_details()
 
-#         print(
-#             f"function get inventory & compare it : report content after getting details :"
-#         )
-#         print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
+        print(
+            f"function get inventory & compare it : report content after getting details :"
+        )
+        print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
 
-#         self.applicationState = "4 - got full report"
+        self.applicationState = "4 - got full report"
 
-#         # with open("debug/new_inventory.txt", 'w') as f:
-#         #     json.dump(self.newInventory.items, f, indent=3, ensure_ascii=False)
+        # with open("debug/new_inventory.txt", 'w') as f:
+        #     json.dump(self.newInventory.items, f, indent=3, ensure_ascii=False)

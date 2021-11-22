@@ -21,6 +21,8 @@ class TrioHostProto(Protocol):
     implemented by the view to run trio whithin the UI event loop.
     """
 
+    uses_signal_set_wakeup_fd: bool
+
     def run_sync_soon_threadsafe(self, func: Callable[[], Any]):
         """
         Must schedule execution of func and be threadsafe.
@@ -60,7 +62,7 @@ class ControllerProto(Protocol):
     The view will call this protocol upon UI interaction
     """
 
-    def __init__(self, model: models.Model, view: ViewProto):
+    def __init__(self, model: models._Model, view: ViewProto):
         ...
 
     def start_trio_guest(self, host: TrioHostProto):

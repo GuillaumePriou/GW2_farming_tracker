@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable, Iterable, TypeAlias, TypeVar, overload
+import types
+from typing import Any, Callable, Generic, Iterable, TypeAlias, TypeVar, overload
 
+T = TypeVar("T")
 Cls = TypeVar("Cls", bound=type)
 
 JsonValue: TypeAlias = None | bool | int | float | str
@@ -16,6 +18,30 @@ AttrClass: TypeAlias = type
 from collections import abc
 
 import attr
+
+
+class SimpleNamespace(Generic[T]):
+    """
+    Typed version of `types.SimpleNamespace`
+    """
+
+    def __init__(self, /, **kwargs: T):
+        self.__dict__.update(kwargs)
+
+    def __repr__(self):
+        items = (f"{k}={v!r}" for k, v in self.__dict__.items())
+        return "{}({})".format(type(self).__name__, ", ".join(items))
+
+    def __eq__(self, other):
+        if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
+            return self.__dict__ == other.__dict__
+        return NotImplemented
+
+    def __getattribute__(self, __name: str) -> T:
+        return super().__getattribute__(__name)
+
+    def __setattr__(self, __name: str, __value: T) -> None:
+        return super().__setattr__(__name, __value)
 
 
 def required_attrs(*attributes: str):
