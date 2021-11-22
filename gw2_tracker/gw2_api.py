@@ -80,20 +80,6 @@ class _ItemPrices(TypedDict):
     sells: _Listing
 
 
-class _ItemData(TypedDict):
-    id: int
-    chat_link: str
-    name: str
-    icon: str
-    type: str
-    rarity: str
-    level: int
-    vendor_value: int
-    flags: list[str]
-    game_types: list[str]
-    restrictions: list[str]
-
-
 @attr.define
 class GW2APIError(Exception):
     """
@@ -297,9 +283,9 @@ async def get_items_prices(
 
 async def get_items_data(
     session: asks.Session, item_ids: list[str]
-) -> dict[str, _ItemData]:
+) -> dict[str, models.ItemData]:
     url = _URLS.ITEM_DATA % {"ids": ",".join(item_ids)}
-    data: list[_ItemData] = await call_api(session, url)
+    data: list[models.ItemData] = await call_api(session, url)
     for d in data:
         if _FLAG_NO_SELL in d["flags"]:
             d["vendor_value"] = 0

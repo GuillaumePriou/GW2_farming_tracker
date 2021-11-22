@@ -19,7 +19,7 @@ import types
 import typing
 from collections import abc
 from pathlib import Path
-from typing import IO, Any, Mapping, NewType, TypeAlias
+from typing import IO, Any, Mapping, NewType, TypeAlias, TypedDict
 
 import attr
 import pendulum
@@ -29,6 +29,20 @@ from pendulum.datetime import DateTime
 from gw2_tracker import utils
 
 APIKey: TypeAlias = NewType("APIKey", str)
+ItemID: TypeAlias = NewType("ItemID", str)
+
+class ItemData(TypedDict):
+    id: int
+    chat_link: str
+    name: str
+    icon: str
+    type: str
+    rarity: str
+    level: int
+    vendor_value: int
+    flags: list[str]
+    game_types: list[str]
+    restrictions: list[str]
 
 
 @frozen
@@ -288,6 +302,17 @@ class _Model:
         with self.filepath.open("wt", encoding="utf-8") as file:
             json.dump(obj, file)
 
+@mutable
+class Cache:
+    dirpath: Path = field(converter=Path)
+    item_data: dict[ItemID, ItemData] = field(factory=dict)
+    images: list[ItemID] = field(factory=list)
+
+    @classmethod
+    def from_dir(dirpath: Path) -> Cache:
+        # TODO
+
+        pass
 
 class Model:
     def __init__(self, api_key=""):
