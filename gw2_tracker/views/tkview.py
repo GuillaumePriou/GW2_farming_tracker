@@ -4,17 +4,15 @@ View layer of GW2 tool to evaluate gold earnings.
 
 @author: Krashnark
 """
+import collections
 import tkinter as tk
+import traceback
 from importlib import abc, resources
 from tkinter import ttk
 from typing import Any, ClassVar, Literal
-import collections
+
 import attr
-from typing import ClassVar
-
 import outcome
-import traceback
-
 from PIL import Image, ImageTk
 
 from gw2_tracker import protocols
@@ -25,6 +23,7 @@ ASSETS = {
     k: ASSET_SOURCES.joinpath(f"{k}_coin_20px.png")
     for k in ("copper", "silver", "gold")
 }
+
 
 @attr.define
 class TkTrioHost:
@@ -43,18 +42,18 @@ class TkTrioHost:
 
     def __attrs_post_init__(self):
         self._tk_func_name = self._root.register(self._tk_func)
-    
+
     def _tk_func(self):
         # call a queued func
         self._queue.popleft()()
-    
+
     def run_sync_soon_threadsafe(self, func):
         self._queue.append(func)
-        self._root.call('after', 'idle', self._tk_func_name)
+        self._root.call("after", "idle", self._tk_func_name)
 
     def run_sync_soon_not_threadsafe(self, func):
         self._queue.append(func)
-        self._root.call('after', 'idle', 'after', 0, self._tk_func_name)
+        self._root.call("after", "idle", "after", 0, self._tk_func_name)
 
     def done_callback(self, trio_outcome: outcome.Outcome):
         # TODO: improve this, use logging
@@ -63,7 +62,6 @@ class TkTrioHost:
             exc = trio_outcome.error
             traceback.print_exception(type(exc), exc, exc.__traceback__)
         self._root.destroy()
-    
 
 
 class ScrollableFrame(ttk.Frame):
@@ -386,7 +384,7 @@ class TkView(protocols.ViewProto):
 
         self.fullReportDisplay = FullReportDisplay(self)
         self.fullReportDisplay.grid(row=5, column=0, columnspan=3)
-    
+
     def get_trio_host(self) -> TkTrioHost:
         return TkTrioHost(self.root)
 

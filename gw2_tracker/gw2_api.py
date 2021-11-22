@@ -15,6 +15,7 @@ Main features :
 @author: Krashnark
 """
 from collections import abc
+from pathlib import Path
 from typing import Any, Final, NewType, TypeAlias, TypedDict, TypeVar
 
 import asks
@@ -23,7 +24,7 @@ import requests
 import trio
 import yarl
 
-from gw2_tracker import models, protocols, utils
+from gw2_tracker import models, utils
 
 # Types aliases
 T = TypeVar("T")
@@ -39,9 +40,12 @@ _URLS: Final[utils.SimpleNamespace[yarl.URL]] = utils.SimpleNamespace(
     BANK_MATERIALS=base / "account/materials",
     CHARACTER_LIST=base / "characters",
     CHARACTER_INVENTORY=base / "characters/{character}/inventory",
+    ITEM_PRICES=base / "commerce/prices",
+    ITEM_DATA=base / "items",
 )
 
 _HTTP_OK: Final[int] = 200
+_FLAG_NO_SELL: Final[str] = "NoSell"
 
 
 class KeyPermissions(TypedDict):
@@ -62,6 +66,32 @@ class _Slot(_SlotID, TypedDict, total=False):
     charges: int
     count: int
     value: int
+
+
+class _Listing(TypedDict):
+    unit_price: int
+    quantity: int
+
+
+class _ItemPrices(TypedDict):
+    id: int
+    whitelisted: bool
+    buys: _Listing
+    sells: _Listing
+
+
+class _ItemData(TypedDict):
+    id: int
+    chat_link: str
+    name: str
+    icon: str
+    type: str
+    rarity: str
+    level: int
+    vendor_value: int
+    flags: list[str]
+    game_types: list[str]
+    restrictions: list[str]
 
 
 @attr.define
@@ -161,11 +191,15 @@ async def _gather(*tasks: abc.Awaitable[T]) -> tuple[T, ...]:
     return tuple(results)
 
 
-async def call_api(session: asks.Session, url: yarl.URL, key: models.APIKey) -> Any:
-    headers = get_headers(key)
+async def call_api(
+    session: asks.Session, url: yarl.URL, key: models.APIKey = None
+) -> Any:
+    headers = {}
+    if key is not None:
+        headers = get_headers(key)
     response = session.get(url, headers=headers)
     if response.status == _HTTP_OK:
-        return await response.json()
+        return response.json()
     else:
         raise GW2APIError(f"Could not reach {url}: {response}")
 
@@ -245,6 +279,48 @@ async def get_snapshot(session: asks.Session, key: models.APIKey) -> models.Snap
         get_aggregated_inventory(session, key), get_wallet(session, key)
     )
     return models.Snapshot(key=key, inventory=inventory, wallet=wallet)
+
+
+async def get_items_prices(
+    session: asks.Session, item_ids: list[str]
+) -> dict[str, tuple[int, int]]:
+    """
+    get the highest buy offer and lowest sell offer of items
+    """
+    url = _URLS.ITEM_PRICES % {"ids": ",".join(item_ids)}
+    listings: list[_ItemPrices] = await call_api(session, url)
+    return {
+        str(data["id"]): (data["buys"]["unit_price"], data["sells"]["unit_price"])
+        for data in listings
+    }
+
+
+async def get_items_data(
+    session: asks.Session, item_ids: list[str]
+) -> dict[str, _ItemData]:
+    url = _URLS.ITEM_DATA % {"ids": ",".join(item_ids)}
+    data: list[_ItemData] = await call_api(session, url)
+    for d in data:
+        if _FLAG_NO_SELL in d["flags"]:
+            d["vendor_value"] = 0
+    return {str(d["id"]): d for d in data}
+
+
+async def download_images(
+    session: asks.Session, urls: list[yarl.URL], target_dir: Path
+):
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    async def download_image(session: asks.Session, url: yarl.URL, target_dir: Path):
+        r = await session.get(str(url), stream=True)
+        async with await trio.open_file(target_dir / url.name, "wb") as file:
+            async with r.body as content:
+                async for chunk in content:
+                    await file.write(chunk)
+
+    async with trio.open_nursery() as nursery:
+        for url in urls:
+            nursery.start_soon(download_image, session, url, target_dir)
 
 
 def GW2_API_handler(url, api_key=""):
