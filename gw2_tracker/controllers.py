@@ -11,18 +11,19 @@ import trio
 from gw2_tracker import models, protocols
 
 
-class TrioGuest:
+class GuestTrio:
     started: bool = False
+    host: None | protocols.TrioHostProto = None
     nursery: trio.Nursery
     session: asks.Session
 
     def start(self, host: protocols.TrioHostProto):
+        self.host = host
         trio.lowlevel.start_guest_run(
             self._main,
             run_sync_soon_not_threadsafe=host.run_sync_soon_not_threadsafe,
             run_sync_soon_threadsafe=host.run_sync_soon_threadsafe,
             done_callback=host.done_callback,
-            # TODO: change this if tkinter use it
             host_uses_signal_set_wakeup_fd=host.uses_signal_set_wakeup_fd,
         )
 
@@ -37,10 +38,12 @@ class TrioGuest:
 class Controller:
     model: models.Model
     view: protocols.ViewProto
+    guest_trio: GuestTrio
 
     def __init__(self, model: models.Model, view: protocols.ViewProto):
         self.model = model
         self.view = view
+        self.guest_trio = GuestTrio()
 
         if self.model.applicationState == "0 - started":
             initial_msg_to_display = (
@@ -57,6 +60,16 @@ class Controller:
 
         self.view.refresh_api_key_entry_content(self.model.apiKey.keyValue)
         self.view.show_success(initial_msg_to_display)
+
+    def start_trio_guest(self, host: protocols.TrioHostProto):
+        if self.guest_trio.host is not None:
+            if not self.guest_trio.started:
+                msg = "guest-mode trio is currently starting"
+            else:
+                msg = "guest-mode trio is already started"
+            msg += f" with host {self.guest_trio.host}"
+            raise RuntimeError(msg)
+        self.guest_trio.start(host)
 
     def save_api_key(self, api_key_input):
         try:
