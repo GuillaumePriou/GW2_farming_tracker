@@ -8,7 +8,7 @@ View layer of GW2 tool to evaluate gold earnings.
 import asks
 import trio
 
-from gw2_tracker import protocols
+from gw2_tracker import models, protocols
 
 
 class TrioGuest:
@@ -35,7 +35,10 @@ class TrioGuest:
 
 
 class Controller:
-    def __init__(self, model, view):
+    model: models.Model
+    view: protocols.ViewProto
+
+    def __init__(self, model: models.Model, view: protocols.ViewProto):
         self.model = model
         self.view = view
 
