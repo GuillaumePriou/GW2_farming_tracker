@@ -5,7 +5,7 @@ This module also provide a sort of specification
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Coroutine, Protocol
 
 import outcome
 
@@ -52,6 +52,19 @@ class TrioHostProto(Protocol):
         by stopping trio's event loop. This way, both loops start and end at the
         same time.
         """
+        ...
+
+
+class GuestTrioProto(Protocol):
+    """
+    Used to schedule a coroutine in a guest run of trio
+    """
+
+    def start(self, host: TrioHostProto) -> None:
+        """Starts a main trio function in guest mode"""
+
+    def start_soon(self, task: Callable[..., Coroutine], *args: Any) -> None:
+        """Schedule an awaitable to be run by guest-mode trio"""
         ...
 
 

@@ -13,8 +13,8 @@ Main features :
 
 from __future__ import annotations
 
+import enum
 import json
-import os.path
 import types
 import typing
 from collections import abc
@@ -23,13 +23,15 @@ from typing import IO, Any, Mapping, NewType, TypeAlias, TypedDict
 
 import attr
 import pendulum
+import trio
 from attr import field, frozen, mutable
 from pendulum.datetime import DateTime
 
-from gw2_tracker import utils
+from gw2_tracker import protocols, reports, utils
 
 APIKey: TypeAlias = NewType("APIKey", str)
 ItemID: TypeAlias = NewType("ItemID", str)
+
 
 class ItemData(TypedDict):
     id: int
@@ -296,11 +298,12 @@ class _Model:
         fields = utils.unjsonize(cls, obj, ignore=["filepath"])
         return _Model(filepath=filepath, **fields)
 
-    def save(self):
+    def save(self, indent=4, sort_keys=True, **kwargs):
         """Save the model to the given file"""
         obj = utils.jsonize(self, ignore=["filepath"])
         with self.filepath.open("wt", encoding="utf-8") as file:
-            json.dump(obj, file)
+            json.dump(obj, file, indent=indent, sort_keys=sort_keys, **kwargs)
+
 
 @mutable
 class Cache:
@@ -309,109 +312,156 @@ class Cache:
     images: list[ItemID] = field(factory=list)
 
     @classmethod
-    def from_dir(dirpath: Path) -> Cache:
+    def from_dir(cls, dirpath: Path) -> Cache:
         # TODO
 
         pass
 
+
+class States(enum.IntEnum):
+    STARTED = 0
+    KEY = 1
+    SNAP_START = 2
+    SNAP_LATER = 3
+    REPORT = 4
+
+    @classmethod
+    def from_json(cls, value) -> States:
+        return cls(value)
+
+    def to_json(self) -> int:
+        return self._value_
+
+
+@mutable
 class Model:
-    def __init__(self, api_key=""):
+    filepath: Path = field(converter=Path)
+    state: States = States.STARTED
+    current_key: None | APIKey = None
+    start_snapshot: None | Snapshot = None
+    later_snapshot: None | Snapshot = None
+    report: None | reports.Report = None
+
+    @classmethod
+    def from_file(cls, filepath: str | Path) -> Model:
         """
-        Model initialization.
-
-        self.applicationState possible values :
-            - "0 - started"
-            - "1 - got api key"
-            - "2 - got start inventory"
-            - "3 - got end inventory"
-            - "4 - got full report"
+        Deserialize a model from a file and make the model save itself
+        to this file
         """
-        self.applicationState = "0 - started"
-        self.apiKey = (
-            gw2_api.APIKey()
-        )  # Declare API key, try to load a previously saved API key
-        self.referenceInventory = Inventory()
-        self.newInventory = Inventory()
-        self.report = report.Report()
+        filepath = Path(filepath)
 
-        if self.apiKey.keyValue != "":
-            self.applicationState = "1 - got api key"
+        with filepath.open("rt", encoding="utf-8") as file:
+            obj = json.load(file)
 
-        if self.applicationState == "1 - got api key":
-            # Try to load saved reference inventory
-            if os.path.isfile("Application_data/start_inventory.txt"):
-                self.referenceInventory.load_from_file(
-                    "Application_data/start_inventory.txt", self.apiKey.keyValue
-                )
-                self.applicationState = "2 - got start inventory"
-            else:
-                print("Could not find saved and valid reference inventory.")
+        if not isinstance(obj, dict):
+            raise ValueError(f"{filepath} does not contain a json object")
 
-        # This loading do not make sense without loading the full report
-        # if self.applicationState == "2 - got start inventory" :
-        #     # try to load target inventory
-        #     try:
-        #         self.referenceInventory.load_from_file("Application_data/end_inventory.txt", self.apiKey)
-        #         self.applicationState = "3 - got end inventory"
-        #     except ValueError as error :
-        #         print ("Could not find saved and valid reference inventory.")
-        #         print (error)
+        fields = utils.unjsonize(cls, obj, ignore=["filepath"])
+        return Model(filepath=filepath, **fields)
 
-        # Maybe will implement load function for report.
-        # Maybe...
+    def to_json(self) -> utils.JsonObject:
+        return utils.jsonize(self, ignore=["filepath"])
 
-    def set_new_key(self, new_key):
-        """User set a new key. Let's validate it and save it."""
-        try:
-            self.apiKey.keyValue = new_key
-            self.applicationState = "1 - got api key"
-        except:
-            pass
+    def to_file(self, indent=4, sort_keys=True, **kwargs) -> None:
+        with self.filepath.open("wt", encoding="utf-8") as file:
+            json.dump(
+                self.to_json(), file, indent=indent, sort_keys=sort_keys, **kwargs
+            )
 
-    def set_reference_inventory(self):
-        """Get full inventory of an account and put it in reference inventory"""
-        if self.applicationState == "0 - started":
-            raise ValueError("Key was not yet defined !")
+    async def save(self):
+        # TODO: make that IO async
+        # is there an async version of json ?
+        self.to_file()
 
-        self.referenceInventory.get_full_inventory(self.apiKey.keyValue)
+    def set_key(self, key: APIKey, guest_trio: protocols.GuestTrioProto = None):
+        """Set a new key as the current key. Key is assumed to be valid"""
+        self.state = States.KEY
+        self.current_key = key
 
-        self.referenceInventory.save_to_file(
-            "Application_data/start_inventory.txt", self.apiKey.keyValue
-        )
+        if guest_trio is not None:
+            copy = attr.evolve(self)
+            guest_trio.start_soon(copy.save)
 
-        self.applicationState = "2 - got start inventory"
+    def set_start_snapshot(
+        self, snapshot: Snapshot, guest_trio: protocols.GuestTrioProto = None
+    ):
+        """Stores a snapshot as the start snapshot"""
+        if self.state < States.KEY:
+            raise ValueError("Cannot set starting snapshot without a key")
 
-        # with open("debug/reference_inventory.txt", 'w') as f:
-        #     json.dump(self.referenceInventory.items, f, indent=3, ensure_ascii=False)
+        if self.current_key != snapshot.key:
+            raise ValueError(
+                f"Current key {self.current_key} doesn't match snapshot key {snapshot.key}"
+            )
 
-    def get_inventory_and_compare_it(self):
-        """
-        Get full inventory of an account and put it in new/updated inventory.
-        Then compare reference inventory with new inventory and build the report.
-        """
-        if self.applicationState in ("0 - started", "1 - got api key"):
-            raise ValueError("Missing key or reference inventory !")
-        self.newInventory.get_full_inventory(self.apiKey.keyValue)
+        self.start_snapshot = snapshot
+        self.state = States.SNAP_START
 
-        self.referenceInventory.save_to_file(
-            "Application_data/end_inventory.txt", self.apiKey.keyValue
-        )
-        self.applicationState = "3 - got end inventory"
-        self.report.compare_inventories(self.referenceInventory, self.newInventory)
+        if guest_trio is not None:
+            copy = attr.evolve(self)
+            guest_trio.start_soon(copy.save)
 
-        print(
-            f"function get inventory & compare it : report content after comparison :"
-        )
-        print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
+    def set_later_snapshot(
+        self, snapshot: Snapshot, guest_trio: protocols.GuestTrioProto = None
+    ):
+        """Stores a snapshot as the after snapshot"""
+        if self.state < States.SNAP_START:
+            raise ValueError("Cannot set later snapshot without a starting snapshot")
 
-        self.report.get_item_details()
+        if self.current_key != snapshot.key:
+            raise ValueError(
+                f"Current key {self.current_key} doesn't match snapshot key {snapshot.key}"
+            )
 
-        print(
-            f"function get inventory & compare it : report content after getting details :"
-        )
-        print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
+        self.later_snapshot = snapshot
+        self.state = States.SNAP_LATER
 
-        self.applicationState = "4 - got full report"
+        if guest_trio is not None:
+            copy = attr.evolve(self)
+            guest_trio.start_soon(copy.save)
 
-        # with open("debug/new_inventory.txt", 'w') as f:
-        #     json.dump(self.newInventory.items, f, indent=3, ensure_ascii=False)
+    def set_report(
+        self, report: reports.Report, guest_trio: protocols.GuestTrioProto = None
+    ):
+        """Stores a report as the current report"""
+        if self.state < States.SNAP_LATER:
+            raise ValueError("Cannot set report without a later snapshot")
+
+        self.report = report
+        self.starte = States.REPORT
+
+        if guest_trio is not None:
+            copy = attr.evolve(self)
+            guest_trio.start_soon(copy.save)
+
+    # def get_inventory_and_compare_it(self):
+    #     """
+    #     Get full inventory of an account and put it in new/updated inventory.
+    #     Then compare reference inventory with new inventory and build the report.
+    #     """
+    #     if self.applicationState in ("0 - started", "1 - got api key"):
+    #         raise ValueError("Missing key or reference inventory !")
+    #     self.newInventory.get_full_inventory(self.apiKey.keyValue)
+
+    #     self.referenceInventory.save_to_file(
+    #         "Application_data/end_inventory.txt", self.apiKey.keyValue
+    #     )
+    #     self.applicationState = "3 - got end inventory"
+    #     self.report.compare_inventories(self.referenceInventory, self.newInventory)
+
+    #     print(
+    #         f"function get inventory & compare it : report content after comparison :"
+    #     )
+    #     print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
+
+    #     self.report.get_item_details()
+
+    #     print(
+    #         f"function get inventory & compare it : report content after getting details :"
+    #     )
+    #     print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
+
+    #     self.applicationState = "4 - got full report"
+
+    #     # with open("debug/new_inventory.txt", 'w') as f:
+    #     #     json.dump(self.newInventory.items, f, indent=3, ensure_ascii=False)
