@@ -15,7 +15,7 @@ import attr
 import outcome
 from PIL import Image, ImageTk
 
-from gw2_tracker import protocols, report
+from gw2_tracker import protocols, reports
 
 ASSET_SOURCES = resources.files("gw2_tracker").joinpath("assets")
 
@@ -299,7 +299,7 @@ class FullReportDisplay(ttk.Frame):
         - Liquid gold value
     """
 
-    def __init__(self, parent, report_to_display: report.Report = None):
+    def __init__(self, parent, report_to_display: reports.Report = None):
         super().__init__(parent)
         # self.farmTimeLabel = ttk.Label(text='Durée : à calculer')
         # self.farmTimeLabel.grid(row=0, column=0)
@@ -338,7 +338,7 @@ class FullReportDisplay(ttk.Frame):
         # print(f'report_to_display.totalLiquidGoldValue = {report_to_display.totalLiquidGoldValue}')
         # print(f'report_to_display.itemsDetail = {report_to_display.itemsDetail}')
 
-    def update_detail_display(self, new_report: report.Report):
+    def update_detail_display(self, new_report: reports.Report):
         # re-init with new value
         self.details.destroy()
         self.details = DetailsReportDisplay(self, new_report.itemsDetail)
@@ -347,11 +347,23 @@ class FullReportDisplay(ttk.Frame):
 
 class TkView(protocols.ViewProto):
     root: tk.Tk
-    controller: None | protocols.ControllerProto
+    controller: protocols.ControllerProto
 
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("GW2 farming tracker")
+        self._build()
+
+    def get_trio_host(self) -> TkTrioHost:
+        return TkTrioHost(self.root)
+
+    def set_controller(self, controller):
+        self.controller = controller
+
+    def start_ui(self) -> None:
+        self.root.mainloop()
+
+    def _build(self):
 
         # Define a big important message to help user to use the this application
         self.label_main_message = ttk.Label(
@@ -382,12 +394,6 @@ class TkView(protocols.ViewProto):
 
         self.display_report = FullReportDisplay(self.root)
         self.display_report.grid(row=5, column=0, columnspan=3)
-
-    def get_trio_host(self) -> TkTrioHost:
-        return TkTrioHost(self.root)
-
-    def set_controller(self, controller):
-        self.controller = controller
 
     def refresh_api_key_entry_content(self, value_from_model):
         self.input_key.insert(0, value_from_model)

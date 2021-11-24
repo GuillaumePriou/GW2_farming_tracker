@@ -34,6 +34,9 @@ class GuestTrio:
             self.started = True
             await trio.sleep_forever()
 
+    def start_soon(self, task, *args):
+        self.nursery.start_soon(task, *args)
+
 
 class Controller:
     model: models.Model
