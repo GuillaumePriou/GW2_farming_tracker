@@ -11,5 +11,5 @@ CONFIG: utils.SimpleNamespace[Path] = utils.SimpleNamespace(
 
 
 def main():
-    instance = app.GW2Tracker()
+    instance = app.GW2Tracker(model_file=CONFIG.model, cache_dir=CONFIG.cache)
     instance.start()
