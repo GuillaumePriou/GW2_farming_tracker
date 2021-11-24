@@ -10,6 +10,12 @@ import trio
 
 from gw2_tracker import models, protocols
 
+_MESSAGES = {
+    models.States.STARTED: "Welcome. Enter a valid GW2 API key",
+    models.States.KEY: "Key is valid. Click to save start inventory",
+    models.States.SNAP_START: "Start inventory saved. Click to compute gains",
+}
+
 
 class GuestTrio:
     started: bool = False
@@ -48,21 +54,11 @@ class Controller:
         self.view = view
         self.guest_trio = GuestTrio()
 
-        if self.model.applicationState == "0 - started":
-            initial_msg_to_display = (
-                "Bienvenue. saissisez une clé API Guild Wars 2 valide."
-            )
-        elif self.model.applicationState == "1 - got api key":
-            initial_msg_to_display = (
-                "Clé validée. Définissez l'inventaire de départ (référence)"
-            )
-        elif self.model.applicationState == "2 - got start inventory":
-            initial_msg_to_display = (
-                "Inventaire de départ défini. Jouez puis calculez vos gains."
-            )
+        if self.model.current_key is not None:
+            self.view.display_key(self.model.current_key)
 
-        self.view.refresh_api_key_entry_content(self.model.apiKey.keyValue)
-        self.view.show_success(initial_msg_to_display)
+        if self.model.state in _MESSAGES:
+            self.view.display_message(_MESSAGES[self.model.state])
 
     def start_trio_guest(self, host: protocols.TrioHostProto):
         if self.guest_trio.host is not None:

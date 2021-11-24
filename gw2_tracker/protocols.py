@@ -5,11 +5,13 @@ This module also provide a sort of specification
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Coroutine, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, Protocol
 
 import outcome
 
-from gw2_tracker import models
+if TYPE_CHECKING:
+    # prevent circular imports due to typechecking
+    from gw2_tracker import models
 
 
 class TrioHostProto(Protocol):
@@ -101,3 +103,10 @@ class ViewProto(Protocol):
     def start_ui(self):
         """Start the UI event loop"""
         ...
+
+    def display_key(self, key: models.APIKey):
+        """Display the current used API key"""
+        ...
+
+    def display_message(self, msg: str):
+        """Displaty the main message"""

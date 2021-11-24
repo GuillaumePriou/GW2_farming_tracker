@@ -315,11 +315,11 @@ class Cache:
     item_data: dict[ItemID, ItemData] = field(factory=dict)
     images: list[ItemID] = field(factory=list)
 
-    @classmethod
-    def from_dir(cls, dirpath: Path) -> Cache:
-        # TODO
-
-        pass
+    # @classmethod
+    # def from_dir(cls, dirpath: Path) -> Cache:
+    #    # TODO
+    #
+    #    pass
 
 
 class States(enum.IntEnum):
