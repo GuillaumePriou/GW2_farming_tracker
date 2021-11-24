@@ -19,7 +19,7 @@ import types
 import typing
 from collections import abc
 from pathlib import Path
-from typing import IO, Any, Mapping, NewType, TypeAlias, TypedDict, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Any, Mapping, NewType, TypeAlias, TypedDict
 
 import attr
 import pendulum
