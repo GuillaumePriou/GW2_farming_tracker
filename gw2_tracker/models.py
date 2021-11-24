@@ -19,7 +19,7 @@ import types
 import typing
 from collections import abc
 from pathlib import Path
-from typing import IO, Any, Mapping, NewType, TypeAlias, TypedDict
+from typing import IO, Any, Mapping, NewType, TypeAlias, TypedDict, TYPE_CHECKING
 
 import attr
 import pendulum
@@ -27,7 +27,11 @@ import trio
 from attr import field, frozen, mutable
 from pendulum.datetime import DateTime
 
-from gw2_tracker import protocols, reports, utils
+from gw2_tracker import protocols, utils
+
+if TYPE_CHECKING:
+    # avoic circular import
+    from gw2_tracker import reports
 
 APIKey: TypeAlias = NewType("APIKey", str)
 ItemID: TypeAlias = NewType("ItemID", str)
