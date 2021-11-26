@@ -119,6 +119,7 @@ venv.bak/
 
 # VSCode project settings
 .vscode
+*.code-workspace
 
 # Rope project settings
 .ropeproject
@@ -141,5 +142,5 @@ dmypy.json
 cython_debug/
 
 # GW2 tracker specific : Do not track user setting.
-Application_data/
+gw2_tracker_data/
 debug/

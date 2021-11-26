@@ -16,13 +16,28 @@ Main features :
 """
 from collections import abc
 from pathlib import Path
-from typing import Any, Final, NewType, TypeAlias, TypedDict, TypeVar
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Final,
+    Generator,
+    Iterable,
+    Mapping,
+    NewType,
+    TypeAlias,
+    TypedDict,
+    TypeVar,
+)
 
 import asks
 import attr
+import outcome
 import requests
 import trio
 import yarl
+from outcome import Error, Value
 
 from gw2_tracker import models, utils
 
@@ -88,6 +103,9 @@ class GW2APIError(Exception):
 
     msg: str
 
+    def __str__(self) -> str:
+        return self.msg
+
 
 @utils.autoformat
 @attr.define
@@ -100,7 +118,7 @@ class APIKeyError(GW2APIError):
 @utils.autoformat
 @attr.define
 class InvalidAPIKeyError(APIKeyError):
-    msg: str = "Invalid API Key {key}"
+    msg: str = "Invalid API Key '{key}'"
 
 
 @utils.autoformat
@@ -114,12 +132,12 @@ class KeyPermissionError(APIKeyError):
     msg: str = "API Key {key} does not have the required permissions {missing_perms}"
 
 
-def get_headers(key: models.APIKey) -> dict[str, str]:
+def _get_headers(key: models.APIKey) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
 
-def get_key_permissions(key: models.APIKey) -> KeyPermissions | None:
-    response = requests.get(str(_URLS.KEY_INFO), headers=get_headers(key))
+def get_key_permissions_sync(key: models.APIKey) -> KeyPermissions | None:
+    response = requests.get(str(_URLS.KEY_INFO), headers=_get_headers(key))
     if response.status_code != _HTTP_OK:
         return None
     else:
@@ -132,18 +150,61 @@ def get_key_permissions(key: models.APIKey) -> KeyPermissions | None:
         )
 
 
-def validate_key(key: models.APIKey):
-    perms = get_key_permissions(key)
+async def get_key_permissions(
+    session: asks.Session, key: models.APIKey
+) -> KeyPermissions:
+    """
+    Returns the permissions an API key provides
+    """
+    content = await call_api(session, _URLS.KEY_INFO, key=key)
+    permissions: KeyPermissions = content["permissions"]
+    return KeyPermissions(
+        wallet="wallet" in permissions,
+        inventories="inventories" in permissions,
+        characters="characters" in permissions,
+    )
+
+
+async def validate_key(
+    session: asks.Session,
+    key: models.APIKey,
+    callback: Callable[[models.APIKey, outcome.Outcome], Awaitable],
+) -> None:
+    """
+    Validate that an API key has all the necessary permissions
+
+    Arguments:
+        sessions: http session to use to connect to the API
+        key: key to test
+        callback: async function accepting the tested key and an `Outcome`. The
+            outcome will be either an `Error` instance with the encountered
+            error, or `Value(True)`
+    """
+    perms_out: Value | Error = await outcome.acapture(get_key_permissions, session, key)
+    if isinstance(perms_out, Error):
+        await callback(key, perms_out)
+    else:
+        perms: KeyPermissions = perms_out.unwrap()
+        if not all(perms.values()):
+            missing_perms = [k for k, v in perms.items() if not v]
+            err = Error(KeyPermissionError(key=key, missing_perms=tuple(missing_perms)))  # type: ignore
+            await callback(key, err)
+        else:
+            await callback(key, Value(True))  # type: ignore
+
+
+def validate_key_sync(key: models.APIKey):
+    perms = get_key_permissions_sync(key)
     if perms is None:
         raise InvalidAPIKeyError(key=key)
     if not all(perms.values()):
         missing_perms = [k for k, v in perms.items() if not v]
-        raise PermissionError(*missing_perms)
+        raise KeyPermissionError(key=key, missing_perms=tuple(missing_perms))
 
 
-def is_key_valide(key: models.APIKey) -> bool:
+def is_key_valide_sync(key: models.APIKey) -> bool:
     try:
-        validate_key(key)
+        validate_key_sync(key)
         return True
     except GW2APIError:
         return False
@@ -161,20 +222,17 @@ def _unwrap_slot(slot: _Slot) -> tuple[str, int]:
                 count = slot[k]
                 break
         else:
-            raise ValueError(f"Invalid slot: {slot}")
-    return slot["id"], count
+            raise ValueError(f"Invalid slot: <{slot}>")
+    return str(slot["id"]), count
 
 
-async def _gather(*tasks: abc.Awaitable[T]) -> tuple[T, ...]:
-    async def collect(results: list[T], index: int, task: abc.Awaitable[T]):
-        results[index] = await task
-
-    results: list[T] = [Any] * len(tasks)
-    async with trio.open_nursery() as nursery:
-        for index, task in enumerate(tasks):
-            nursery.start_soon(collect, results, index, task)
-
-    return tuple(results)
+def _slots_to_dict(slots: list[_Slot]) -> dict[str, int]:
+    try:
+        return dict(map(_unwrap_slot, filter(None, slots)))
+    except ValueError as err:
+        raise ValueError(
+            "Invalid slots:\n[\n %s\n]" % (",\n ".join(map(str, slots)))
+        ) from err
 
 
 async def call_api(
@@ -182,9 +240,9 @@ async def call_api(
 ) -> Any:
     headers = {}
     if key is not None:
-        headers = get_headers(key)
-    response = session.get(url, headers=headers)
-    if response.status == _HTTP_OK:
+        headers = _get_headers(key)
+    response = await session.get(str(url), headers=headers)
+    if response.status_code == _HTTP_OK:
         return response.json()
     else:
         raise GW2APIError(f"Could not reach {url}: {response}")
@@ -194,21 +252,21 @@ async def get_account_inventory(
     session: asks.Session, key: models.APIKey
 ) -> models.Inventory:
     slots: list[_Slot] = await call_api(session, _URLS.ACCOUNT_INVENTORY, key)
-    return models.Inventory(dict(map(_unwrap_slot, slots)))
+    return models.Inventory(_slots_to_dict(slots))
 
 
 async def get_bank_inventory(
     session: asks.Session, key: models.APIKey
 ) -> models.Inventory:
     slots: list[_Slot] = await call_api(session, _URLS.BANK_INVENTORY, key)
-    return models.Inventory(dict(map(_unwrap_slot, slots)))
+    return models.Inventory(_slots_to_dict(slots))
 
 
 async def get_bank_materials(
     session: asks.Session, key: models.APIKey
 ) -> models.Inventory:
     slots: list[_Slot] = await call_api(session, _URLS.BANK_MATERIALS, key)
-    return models.Inventory(dict(map(_unwrap_slot, slots)))
+    return models.Inventory(_slots_to_dict(slots))
 
 
 async def get_character_inventory(
@@ -218,9 +276,10 @@ async def get_character_inventory(
     url = _URLS.CHARACTER_INVENTORY.with_path(
         _URLS.CHARACTER_INVENTORY.path.format(character=character)
     )
-    bags: list[list[_Slot]] = await call_api(session, url, key)
+    content = await call_api(session, url, key)
+    bags: list[list[_Slot]] = [b["inventory"] for b in content["bags"] if b]
     return sum(
-        (models.Inventory(dict(map(_unwrap_slot, bag))) for bag in bags if bag),
+        (models.Inventory(_slots_to_dict(bag)) for bag in bags if bag),
         start=models.Inventory(),
     )
 
@@ -229,7 +288,7 @@ async def get_characters_inventories(
     session: asks.Session, key: models.APIKey
 ) -> models.Inventory:
     character_names: list[str] = await call_api(session, _URLS.CHARACTER_LIST, key)
-    inventories = await _gather(
+    inventories = await utils.gather(
         *(
             get_character_inventory(session, key, character)
             for character in character_names
@@ -241,7 +300,7 @@ async def get_characters_inventories(
 async def get_aggregated_inventory(
     session: asks.Session, key: models.APIKey
 ) -> models.Inventory:
-    inventories = await _gather(
+    inventories = await utils.gather(
         *(
             coro(session, key)
             for coro in (
@@ -257,11 +316,11 @@ async def get_aggregated_inventory(
 
 async def get_wallet(session: asks.Session, key: models.APIKey) -> models.Inventory:
     currencies_list: list[_Slot] = await call_api(session, _URLS.ACCOUNT_WALLET, key)
-    return models.Inventory(dict(map(_unwrap_slot, currencies_list)))
+    return models.Inventory(_slots_to_dict(currencies_list))
 
 
 async def get_snapshot(session: asks.Session, key: models.APIKey) -> models.Snapshot:
-    inventory, wallet = await _gather(
+    inventory, wallet = await utils.gather(
         get_aggregated_inventory(session, key), get_wallet(session, key)
     )
     return models.Snapshot(key=key, inventory=inventory, wallet=wallet)
@@ -269,14 +328,20 @@ async def get_snapshot(session: asks.Session, key: models.APIKey) -> models.Snap
 
 async def get_items_prices(
     session: asks.Session, item_ids: list[str]
-) -> dict[str, tuple[int, int]]:
+) -> dict[str, tuple[None | int, None | int]]:
     """
     get the highest buy offer and lowest sell offer of items
     """
+    if not item_ids:
+        return {}
+    # TODO: handle no offers w/ None values
     url = _URLS.ITEM_PRICES % {"ids": ",".join(item_ids)}
     listings: list[_ItemPrices] = await call_api(session, url)
     return {
-        str(data["id"]): (data["buys"]["unit_price"], data["sells"]["unit_price"])
+        str(data["id"]): (
+            data.get("buys", {}).get("unit_price"),
+            data.get("sells", {}).get("unit_price"),
+        )
         for data in listings
     }
 
@@ -284,6 +349,8 @@ async def get_items_prices(
 async def get_items_data(
     session: asks.Session, item_ids: list[str]
 ) -> dict[str, models.ItemData]:
+    if not item_ids:
+        return {}
     url = _URLS.ITEM_DATA % {"ids": ",".join(item_ids)}
     data: list[models.ItemData] = await call_api(session, url)
     for d in data:

@@ -5,13 +5,15 @@ This module also provide a sort of specification
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, Protocol
+from typing import TYPE_CHECKING, Awaitable, Callable, ClassVar, ParamSpec, Protocol
 
 import outcome
 
 if TYPE_CHECKING:
     # prevent circular imports due to typechecking
     from gw2_tracker import models
+
+P = ParamSpec("P")
 
 
 class TrioHostProto(Protocol):
@@ -23,9 +25,9 @@ class TrioHostProto(Protocol):
     implemented by the view to run trio whithin the UI event loop.
     """
 
-    uses_signal_set_wakeup_fd: bool
+    uses_signal_set_wakeup_fd: ClassVar[bool]
 
-    def run_sync_soon_threadsafe(self, func: Callable[[], Any]):
+    def run_sync_soon_threadsafe(self, func: Callable) -> None:
         """
         Must schedule execution of func and be threadsafe.
 
@@ -34,7 +36,7 @@ class TrioHostProto(Protocol):
         """
         ...
 
-    def run_sync_soon_not_threadsafe(self, func: Callable[[], Any]):
+    def run_sync_soon_not_threadsafe(self, func: Callable) -> None:
         """
         Must schedule execution of func. Need not be threadsafe.
 
@@ -43,7 +45,7 @@ class TrioHostProto(Protocol):
         """
         ...
 
-    def done_callback(self, trio_outcome: outcome.Outcome):
+    def done_callback(self, out: outcome.Outcome) -> None:
         """
         Called when the trio event loop has finished. This should terminate
         the host loop.
@@ -57,15 +59,18 @@ class TrioHostProto(Protocol):
         ...
 
 
-class GuestTrioProto(Protocol):
+class TrioGuestProto(Protocol):
     """
     Used to schedule a coroutine in a guest run of trio
     """
 
-    def start(self, host: TrioHostProto) -> None:
+    def run_in(self, host: TrioHostProto) -> None:
         """Starts a main trio function in guest mode"""
+        ...
 
-    def start_soon(self, task: Callable[..., Coroutine], *args: Any) -> None:
+    def start_soon(
+        self, task: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
+    ):
         """Schedule an awaitable to be run by guest-mode trio"""
         ...
 
@@ -77,11 +82,42 @@ class ControllerProto(Protocol):
     The view will call this protocol upon UI interaction
     """
 
-    def __init__(self, model: models._Model, view: ViewProto):
+    def __init__(self, model: models.Model, view: ViewProto):
         ...
 
     def start_trio_guest(self, host: TrioHostProto):
         """Starts trio in guest mode"""
+        ...
+
+    def close_app(self):
+        """Stops the app
+
+        Called by the view to notify the controller to close the app. This is
+        necessary because only the controller has access to the trio guest run.
+        The view provides a `TrioHostProto` that nows how to stop the GUI part
+        in it's ``done_callback`` method. The controller stops the trio guest
+        run, which once stopped calls the callback to terminate the UI. This
+        way, the UI and the trio loops always run and end at the same time."""
+        ...
+
+    def use_key(self, key: models.APIKey):
+        """
+        Use a new key as the current key. Raises if the key is invalid
+
+        Arguments:
+            key: API key to use
+
+        Raises:
+
+        """
+        ...
+
+    def get_start_snapshot(self) -> None:
+        """retrieve a snapshot for the key and set it as the starting point"""
+        ...
+
+    def compute_gains(self) -> None:
+        """retrieve a final snapshot and compute gains"""
         ...
 
 
@@ -97,16 +133,42 @@ class ViewProto(Protocol):
         """Provide a host that a controller can use to run trio"""
         ...
 
-    def set_controller(self, controller: ControllerProto):
+    def set_controller(self, controller: ControllerProto) -> None:
         ...
 
-    def start_ui(self):
+    def start_ui(self) -> None:
         """Start the UI event loop"""
         ...
 
-    def display_key(self, key: models.APIKey):
+    def display_message(self, msg: str) -> None:
+        """Displaty the main message"""
+        ...
+
+    def display_error(self, err: BaseException) -> None:
+        """Display an exception"""
+        ...
+
+    def display_key(self, key: models.APIKey) -> None:
         """Display the current used API key"""
         ...
 
-    def display_message(self, msg: str):
-        """Displaty the main message"""
+    def display_report(self, report: models.Report) -> None:
+        """Display a report"""
+        ...
+
+    def enable_key_input(self) -> None:
+        """Enable key input
+
+        This is called by the controller when the last key validation is done
+        and another may be attempted. This is to avoid several key validation
+        racing with each other
+        """
+        ...
+
+    def enable_get_start_snapshot(self) -> None:
+        """Enable asking the controller to take a start snapshot"""
+        ...
+
+    def enable_compute_gains(self) -> None:
+        """Enable asking the controller to retrieve end snapshot and compute gains"""
+        ...

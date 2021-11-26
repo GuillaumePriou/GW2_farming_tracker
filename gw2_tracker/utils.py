@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import functools
 import inspect
+import traceback
 import types
+import typing
+from collections import abc
 from typing import Any, Callable, Generic, Iterable, TypeAlias, TypeVar, overload
 
+import attr
+import trio
+
 T = TypeVar("T")
+U = TypeVar("U")
+V = TypeVar("V")
 Cls = TypeVar("Cls", bound=type)
 
 JsonValue: TypeAlias = None | bool | int | float | str
@@ -14,10 +22,6 @@ JsonObject: TypeAlias = dict[str, "AnyJson"]
 AnyJson: TypeAlias = JsonValue | JsonArray | JsonObject
 
 AttrClass: TypeAlias = type
-
-from collections import abc
-
-import attr
 
 
 class SimpleNamespace(Generic[T]):
@@ -42,27 +46,6 @@ class SimpleNamespace(Generic[T]):
 
     def __setattr__(self, __name: str, __value: T) -> None:
         return super().__setattr__(__name, __value)
-
-
-def required_attrs(*attributes: str):
-    """
-    Method decorator to require attributes to be defined on the instance
-    """
-    attrs = list(attributes)
-
-    def wrapper_factory(method):
-        @functools.wraps(method)
-        def wrapped_method(self, *args, **kwargs):
-            missing = [attr for attr in attrs if getattr(self, attr) is None]
-            if missing:
-                raise AttributeError(
-                    f"Method {method.__name__} requires attributes " + " ".join(missing)
-                )
-            return method(self, *args, **kwargs)
-
-        return wrapped_method
-
-    return wrapper_factory
 
 
 @overload
@@ -185,6 +168,14 @@ def jsonize(inst, *, ignore: abc.Container[str] = ()) -> dict[str, Any]:
     }
 
 
+def err_str(err: BaseException) -> str:
+    return f"{err.__class__.__name__}: {err!s}"
+
+
+def err_traceback(err: BaseException) -> str:
+    return "".join(traceback.format_exception(err))  # type: ignore
+
+
 def unjsonize(
     cls: AttrClass, obj: JsonObject, *, ignore: abc.Container[str] = ()
 ) -> dict[str, Any]:
@@ -192,16 +183,15 @@ def unjsonize(
     Deserialize an attr class from json format.
 
     Deserialize an attr class from the json format. This is the inverse
-    operation from `jsonize`, with the some caveats.
-
-    First, only fields whose type is exactly a class will be checked for a
-    ``from_json`` classmethod. Union of any kind of complex typing will not
-    work.
-
-    Second, due to the first caveat, this function will not return an instance
-    of `cls`, but a dict mapping field name from field values. Further
-    deserialization may be performed before constructing an instance with
-    ``cls.__init__(**fields)``, where fields is the return value of this function.
+    operation from `jsonize`, with the following caveats:
+        - type annotations are used to infer the presence of a ``from_json``
+          method on the field's type. Only extremely simple type annotations
+          are properly tested:
+            - Simple classes
+            - Union of exactly None and a simple classe (i.e. ``Optional[]``)
+        - due to the above, this function returns the (partially) deserialized
+          fields rather than an instance. The caller can then further convert
+          fields whose type annotation is too complex for this function.
 
     This is intended as a helper function to implement a ``from_json``
     classmethod on attr-decorated classes.
@@ -243,9 +233,58 @@ def unjsonize(
     fields = {}
     for name, field in expected_fields.items():
         if name in obj:
-            if isinstance(field.type, type) and hasattr(field.type, "from_json"):
-                fields[name] = field.type.from_json(obj[name])  # type: ignore
+            tp = field.type
+            orig = typing.get_origin(field.type)
+            args = typing.get_args(field.type)
+            # black formatter doesn't support match/case yet
+            # match field.type, orig, args:
+            #    case (
+            #        (tp, _, _)
+            #        |  (_, typing.Union | types.UnionType, [None, tp] | [tp, None])
+            #    ) if isinstance(tp, type) and hasattr(tp, "from_json"):
+            #        # simple class type annotations
+            #        fields[name] = tp.from_json(obj[name]) # type: ignore
+            if orig is typing.Union or orig is types.UnionType:
+                if len(args) == 2 and None in args:
+                    # extract the type from the Optional[tp] or Union[None, tp] or None | tp
+                    tp = next(filter(None, args))
+            if isinstance(tp, type) and hasattr(tp, "from_json"):
+                fields[name] = tp.from_json(obj[name])  # type: ignore
             else:
                 fields[name] = obj[name]
 
     return fields
+
+
+@overload
+async def gather(task: abc.Awaitable[T]) -> tuple[T]:
+    ...
+
+
+@overload
+async def gather(t1: abc.Awaitable[T], t2: abc.Awaitable[U]) -> tuple[T, U]:
+    ...
+
+
+@overload
+async def gather(
+    t1: abc.Awaitable[T], t2: abc.Awaitable[U], t3: abc.Awaitable[V]
+) -> tuple[T, U, V]:
+    ...
+
+
+@overload
+async def gather(*tasks: abc.Awaitable[T]) -> tuple[T, ...]:
+    ...
+
+
+async def gather(*tasks):
+    async def collect(results: list, index: int, task: abc.Awaitable):
+        results[index] = await task
+
+    results = [Any] * len(tasks)
+    async with trio.open_nursery() as nursery:
+        for index, task in enumerate(tasks):
+            nursery.start_soon(collect, results, index, task)
+
+    return tuple(results)

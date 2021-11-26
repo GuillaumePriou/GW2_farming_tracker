@@ -14,30 +14,42 @@ Main features :
 from __future__ import annotations
 
 import enum
+import functools
 import json
 import types
 import typing
 from collections import abc
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Mapping, NewType, TypeAlias, TypedDict
+from typing import IO, Any, ClassVar, Iterable, Mapping, NewType, TypeAlias, TypedDict
 
 import attr
 import pendulum
-import trio
-from attr import field, frozen, mutable
 from pendulum.datetime import DateTime
 
 from gw2_tracker import protocols, utils
-
-if TYPE_CHECKING:
-    # avoic circular import
-    from gw2_tracker import reports
 
 APIKey: TypeAlias = NewType("APIKey", str)
 ItemID: TypeAlias = NewType("ItemID", str)
 
 
 class ItemData(TypedDict):
+    """
+    Data returned by the GW2 API on an item
+
+    Attributes:
+        id: numeric ID of the item
+        chat_link: special marker to link the item in chat in-game
+        icon: url to the icon of the item
+        type: type of item
+        rarity
+        level:
+        vendor_value: values of the item when directly sold to merchant
+        flags:
+        game_types: game types in which the item is available
+        restrictions: which character can use this item (e.g. cultural armor is
+            restricted to character of the culture)
+    """
+
     id: int
     chat_link: str
     name: str
@@ -51,7 +63,7 @@ class ItemData(TypedDict):
     restrictions: list[str]
 
 
-@frozen
+@attr.frozen
 class Inventory(abc.Mapping[str, int]):
     """
     Immutable mapping from string ID to non-zero amounts
@@ -64,7 +76,7 @@ class Inventory(abc.Mapping[str, int]):
     difference of the compared set to 0.
     """
 
-    content: Mapping[str, int] = field(factory=dict)
+    content: Mapping[str, int] = attr.field(factory=dict)
 
     @classmethod
     def from_file(cls, file: str | Path | IO[bytes] | IO[str]) -> Inventory:
@@ -122,7 +134,9 @@ class Inventory(abc.Mapping[str, int]):
         """Serialize the instance to json format"""
         return dict(self.content)
 
-    def to_file(self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs):
+    def to_file(
+        self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs
+    ) -> None:
         """Serialize the instance to json format and write to the file
 
         Arguments:
@@ -198,18 +212,22 @@ class Inventory(abc.Mapping[str, int]):
             return bool(diff) and (diff > 0)
 
 
-@frozen
+@attr.frozen
 class Snapshot:
+    """
+    Immutable representation of an account state at a given datetime.
+    """
+
     key: APIKey
     inventory: Inventory
     wallet: Inventory
-    datetime: DateTime = field(factory=pendulum.now)
+    datetime: DateTime = attr.field(factory=pendulum.now)
     name: None | str = None
 
     @classmethod
     def from_file(cls, file: str | Path | IO[bytes] | IO[str]) -> Snapshot:
         """
-        Deserialize a `Snapshot` from a file
+        Deserialize an object from a file
 
         Arguments:
             file: file name, `Path` or opened file to read from
@@ -230,7 +248,7 @@ class Snapshot:
         return cls.from_json(content)
 
     @classmethod
-    def from_json(cls, obj: Any) -> Snapshot:
+    def from_json(cls, obj: utils.JsonObject) -> Snapshot:
         """
         Deserialize an `Inventory` from an already loaded JSON
 
@@ -249,7 +267,7 @@ class Snapshot:
         fields = utils.unjsonize(cls, obj)
         fields["key"] = APIKey(fields["key"])
         fields["datetime"] = DateTime, pendulum.parser.parse(fields["datetime"])
-        return Snapshot(**fields)
+        return cls(**fields)
 
     def to_json(self) -> utils.JsonObject:
         """Serialize the instance to JSON"""
@@ -257,7 +275,9 @@ class Snapshot:
         fields["datetime"] = fields["datetime"].isoformat()
         return fields
 
-    def to_file(self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs):
+    def to_file(
+        self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs
+    ) -> None:
         """Serialize the instance to json format and write to the file
 
         Arguments:
@@ -275,45 +295,266 @@ class Snapshot:
                 json.dump(content, fp, **kwargs)
 
 
-@mutable
-class _Model:
+@attr.frozen
+class ItemDetail:
     """
-    Save the application state
+    Data kept in reports
+
+    Attributes:
+        id: item ID
+        name: full name of the item
+        vendor_value: price of the item when sell to a merchant (0 if cannot
+            be sold)
+        highest_buy: highest black lion buy order for that item at the time of
+            creation of the instance
+        lowest_sell: lowest black lion sell order for that item at the time of
+            creation of the instance
     """
 
-    filepath: Path = field(converter=Path)
-    current_key: None | APIKey = None
-    data: dict[APIKey, list[Snapshot]] = field(factory=dict)
+    BLACK_LION_FEE: ClassVar[float] = 0.15
+
+    id: str
+    name: str
+    vendor_value: int
+    highest_buy: None | int
+    lowest_sell: None | int
+    icon_path: None | Path = None
 
     @classmethod
-    def from_file(cls, filepath: str | Path) -> _Model:
+    def from_file(cls, file: str | Path | IO[bytes] | IO[str]) -> ItemDetail:
         """
-        Deserialize a model from a file and make the model save itself
-        to this file
+        Deserialize a `ItemDetail` object from a file
+
+        Arguments:
+            file: file name, `Path` or opened file to read from
+
+        Returns:
+            deserialized object
+
+        Raises:
+            ValueError: the file is not in the correct format
         """
-        filepath = Path(filepath)
+        if hasattr(file, "read"):
+            file = typing.cast(IO, file)
+            content = json.loads(file.read())
+        else:
+            file = typing.cast(str | Path, file)
+            with Path(file).open("rt", encoding="utf-8") as f:
+                content = json.load(f)
+        return cls.from_json(content)
 
-        with filepath.open("rt", encoding="utf-8") as file:
-            obj = json.load(file)
+    @classmethod
+    def from_json(cls, obj: utils.JsonObject) -> ItemDetail:
+        """
+        Deserialize an object from an already loaded JSON
 
+        Argument:
+            obj: json object to deserialize
+
+        Returns:
+            deserialized object
+
+        Raises:
+            ValueError: the json object is not in the correct format
+        """
         if not isinstance(obj, dict):
-            raise ValueError(f"{filepath} does not contain a json object")
+            raise ValueError(f"expected a JSON object, got {obj}")
 
-        fields = utils.unjsonize(cls, obj, ignore=["filepath"])
-        return _Model(filepath=filepath, **fields)
+        fields = utils.unjsonize(cls, obj)
+        return cls(**fields)
 
-    def save(self, indent=4, sort_keys=True, **kwargs):
-        """Save the model to the given file"""
-        obj = utils.jsonize(self, ignore=["filepath"])
-        with self.filepath.open("wt", encoding="utf-8") as file:
-            json.dump(obj, file, indent=indent, sort_keys=sort_keys, **kwargs)
+    def to_json(self) -> utils.JsonObject:
+        """Serialize the instance to JSON"""
+        return utils.jsonize(self)
+
+    def to_file(
+        self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs
+    ) -> None:
+        """Serialize the instance to json format and write to the file
+
+        Arguments:
+            file: file name, `Path` or `IO` object to write to
+            kwargs: additional keywords argument to pass to `json.dump`
+        """
+        kwargs = kwargs | dict(indent=indent, sort_keys=sort_keys)
+        content = self.to_json()
+        if hasattr(file, "write"):
+            file = typing.cast(IO[str], file)
+            json.dump(content, file, **kwargs)
+        else:
+            file = typing.cast(str | Path, file)
+            with Path(file).open("wt", encoding="utf-8") as fp:
+                json.dump(content, fp, **kwargs)
+
+    @functools.cached_property
+    def value_black_lion_fast(self) -> None | int:
+        """Value of the item when selling it instantly to the black lion"""
+        if self.highest_buy is not None:
+            return int((1 - self.BLACK_LION_FEE) * self.highest_buy)
+
+    @functools.cached_property
+    def value_fast(self) -> int:
+        """Highest value when selling the item immediatly to black lion of vendor"""
+        return max(self.value_black_lion_fast or 0, self.vendor_value)
+
+    @functools.cached_property
+    def value_black_lion_slow(self) -> None | int:
+        """Value of the item when placing a sell order and waiting"""
+        if self.lowest_sell is not None:
+            return int((1 - self.BLACK_LION_FEE) * self.lowest_sell)
+        elif self.highest_buy is not None:
+            # fall back on the buy order and a fast sell
+            return int((1 - self.BLACK_LION_FEE) * self.highest_buy)
+
+    @functools.cached_property
+    def value_slow(self) -> int:
+        """
+        Highest value of the item when placing a sell order and waiting or
+        selling to vendor
+        """
+        return max(self.value_black_lion_slow or 0, self.vendor_value)
+
+    @functools.cached_property
+    def value_black_lion(self) -> None | int:
+        """Highest possible value at the black lion, or None if no offers"""
+        return self.value_black_lion_slow
+
+    @functools.cached_property
+    def value(self) -> int:
+        """Highest possible value at the black lion or vendor"""
+        return self.value_slow
 
 
-@mutable
+# functools.cached_properties uses __dict__, cannot use slots
+@attr.frozen(slots=False)
+class Report:
+    """
+    Stores a computed gain report
+
+    Attributes:
+        start_date: datetime of the starting snapshot
+        end_date: datetime of the final snapshot
+        inv_diff: difference between starting and final inventory
+        wallet_diff: difference between starting and final wallet
+    """
+
+    _DATETIME_FIELDS: ClassVar[Iterable[str]] = ("start_date", "end_date")
+    _COIN_ID: ClassVar[str] = "1"
+
+    start_date: DateTime
+    end_date: DateTime
+    inv_diff: Inventory
+    wallet_diff: Inventory
+    item_details: Mapping[str, ItemDetail]
+
+    def __attrs_post_init__(self):
+        if not (self.inv_diff.keys() <= self.item_details.keys()):
+            raise ValueError(
+                "no item details for ids: "
+                + ", ".join(self.inv_diff.keys() - self.item_details.keys())
+            )
+
+    @classmethod
+    def from_file(cls, file: str | Path | IO[bytes] | IO[str]) -> Report:
+        """
+        Deserialize a `ItemDetail` object from a file
+
+        Arguments:
+            file: file name, `Path` or opened file to read from
+
+        Returns:
+            deserialized object
+
+        Raises:
+            ValueError: the file is not in the correct format
+        """
+        if hasattr(file, "read"):
+            file = typing.cast(IO, file)
+            content = json.loads(file.read())
+        else:
+            file = typing.cast(str | Path, file)
+            with Path(file).open("rt", encoding="utf-8") as f:
+                content = json.load(f)
+        return cls.from_json(content)
+
+    @classmethod
+    def from_json(cls, obj: utils.JsonObject) -> Report:
+        """
+        Deserialize an object from an already loaded JSON
+
+        Argument:
+            obj: json object to deserialize
+
+        Returns:
+            deserialized object
+
+        Raises:
+            ValueError: the json object is not in the correct format
+        """
+        if not isinstance(obj, dict):
+            raise ValueError(f"expected a JSON object, got {obj}")
+
+        fields = utils.unjsonize(cls, obj)
+        for dt_field in cls._DATETIME_FIELDS:
+            fields[dt_field] = DateTime, pendulum.parser.parse(fields[dt_field])
+        return cls(**fields)
+
+    def to_json(self) -> utils.JsonObject:
+        """Serialize the instance to JSON"""
+        fields = utils.jsonize(self)
+        for dt_field in self._DATETIME_FIELDS:
+            fields[dt_field] = fields[dt_field].isoformat()
+        return fields
+
+    def to_file(
+        self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs
+    ) -> None:
+        """Serialize the instance to json format and write to the file
+
+        Arguments:
+            file: file name, `Path` or `IO` object to write to
+            kwargs: additional keywords argument to pass to `json.dump`
+        """
+        kwargs = kwargs | dict(indent=indent, sort_keys=sort_keys)
+        content = self.to_json()
+        if hasattr(file, "write"):
+            file = typing.cast(IO[str], file)
+            json.dump(content, file, **kwargs)
+        else:
+            file = typing.cast(str | Path, file)
+            with Path(file).open("wt", encoding="utf-8") as fp:
+                json.dump(content, fp, **kwargs)
+
+    @property
+    def coins(self) -> int:
+        """
+        Number of coins gained or lost during the period
+        """
+        # May not be there is the diff is 0, inventory strips out zeros
+        return self.wallet_diff.get(self._COIN_ID, 0)
+
+    @functools.cached_property
+    def item_gains(self) -> int:
+        """gains from item changes only"""
+        return sum(
+            count * self.item_details[id_].value for id_, count in self.inv_diff.items()
+        )
+
+    @property
+    def total_gains(self) -> int:
+        """Total gains in coins"""
+        return self.coins + self.item_gains
+
+
+@attr.mutable
 class Cache:
-    dirpath: Path = field(converter=Path)
-    item_data: dict[ItemID, ItemData] = field(factory=dict)
-    images: list[ItemID] = field(factory=list)
+    """
+    Handles API data cached by the app
+    """
+
+    dirpath: Path = attr.field(converter=Path)
+    item_data: dict[ItemID, ItemData] = attr.field(factory=dict)
+    images: list[ItemID] = attr.field(factory=list)
 
     # @classmethod
     # def from_dir(cls, dirpath: Path) -> Cache:
@@ -323,10 +564,14 @@ class Cache:
 
 
 class States(enum.IntEnum):
+    """
+    States of the application repressenting the steps in the computation
+    """
+
     STARTED = 0
     KEY = 1
     SNAP_START = 2
-    SNAP_LATER = 3
+    SNAP_END = 3
     REPORT = 4
 
     @classmethod
@@ -337,14 +582,18 @@ class States(enum.IntEnum):
         return self._value_
 
 
-@mutable
+@attr.mutable
 class Model:
-    filepath: Path = field(converter=Path)
+    """
+    Complete state of the application
+    """
+
+    filepath: Path = attr.field(converter=Path)
     state: States = States.STARTED
     current_key: None | APIKey = None
     start_snapshot: None | Snapshot = None
-    later_snapshot: None | Snapshot = None
-    report: None | reports.Report = None
+    end_snapshot: None | Snapshot = None
+    report: None | Report = None
 
     @classmethod
     def from_file(cls, filepath: str | Path) -> Model:
@@ -364,32 +613,49 @@ class Model:
         return Model(filepath=filepath, **fields)
 
     def to_json(self) -> utils.JsonObject:
+        """Serialize an instance as JSON"""
         return utils.jsonize(self, ignore=["filepath"])
 
     def to_file(self, indent=4, sort_keys=True, **kwargs) -> None:
+        """Serialize the instance to it's file"""
         with self.filepath.open("wt", encoding="utf-8") as file:
             json.dump(
                 self.to_json(), file, indent=indent, sort_keys=sort_keys, **kwargs
             )
 
-    async def save(self):
+    async def save(self) -> None:
+        """Asynchronously save this instance"""
         # TODO: make that IO async
         # is there an async version of json ?
         self.to_file()
 
-    def set_key(self, key: APIKey, guest_trio: protocols.GuestTrioProto = None):
-        """Set a new key as the current key. Key is assumed to be valid"""
+    def set_key(self, key: APIKey, trio_guest: protocols.TrioGuestProto = None) -> None:
+        """
+        Set a new key as the current key. Key is assumed to be valid
+
+        Arguments:
+            key: key to set as the current key
+            trio_guest: is not None, schedule an asynchronous save of the
+                modified models with this object
+        """
         self.state = States.KEY
         self.current_key = key
 
-        if guest_trio is not None:
+        if trio_guest is not None:
             copy = attr.evolve(self)
-            guest_trio.start_soon(copy.save)
+            trio_guest.start_soon(copy.save)
 
     def set_start_snapshot(
-        self, snapshot: Snapshot, guest_trio: protocols.GuestTrioProto = None
-    ):
-        """Stores a snapshot as the start snapshot"""
+        self, snapshot: Snapshot, trio_guest: protocols.TrioGuestProto = None
+    ) -> None:
+        """
+        Stores a snapshot as the start snapshot
+
+        Arguments:
+            snapshot: snaphost to set as the start snapshot
+            trio_guest: is not None, schedule an asynchronous save of the
+                modified models with this object
+        """
         if self.state < States.KEY:
             raise ValueError("Cannot set starting snapshot without a key")
 
@@ -401,14 +667,21 @@ class Model:
         self.start_snapshot = snapshot
         self.state = States.SNAP_START
 
-        if guest_trio is not None:
+        if trio_guest is not None:
             copy = attr.evolve(self)
-            guest_trio.start_soon(copy.save)
+            trio_guest.start_soon(copy.save)
 
-    def set_later_snapshot(
-        self, snapshot: Snapshot, guest_trio: protocols.GuestTrioProto = None
-    ):
-        """Stores a snapshot as the after snapshot"""
+    def set_end_snapshot(
+        self, snapshot: Snapshot, trio_guest: protocols.TrioGuestProto = None
+    ) -> None:
+        """
+        Stores a snapshot as the after snapshot
+
+        Arguments:
+            snapshot: snapshot to set as the end snapshot
+            trio_guest: is not None, schedule an asynchronous save of the
+                modified models with this object
+        """
         if self.state < States.SNAP_START:
             raise ValueError("Cannot set later snapshot without a starting snapshot")
 
@@ -417,26 +690,32 @@ class Model:
                 f"Current key {self.current_key} doesn't match snapshot key {snapshot.key}"
             )
 
-        self.later_snapshot = snapshot
-        self.state = States.SNAP_LATER
+        self.end_snapshot = snapshot
+        self.state = States.SNAP_END
 
-        if guest_trio is not None:
+        if trio_guest is not None:
             copy = attr.evolve(self)
-            guest_trio.start_soon(copy.save)
+            trio_guest.start_soon(copy.save)
 
     def set_report(
-        self, report: reports.Report, guest_trio: protocols.GuestTrioProto = None
-    ):
-        """Stores a report as the current report"""
-        if self.state < States.SNAP_LATER:
-            raise ValueError("Cannot set report without a later snapshot")
+        self, report: Report, trio_guest: protocols.TrioGuestProto = None
+    ) -> None:
+        """Stores a report as the current report
+
+        Arguments:
+            report: report to store
+            trio_guest: is not None, schedule an asynchronous save of the
+                modified models with this object
+        """
+        if self.state < States.SNAP_END:
+            raise ValueError("Cannot set report without an end snapshot")
 
         self.report = report
-        self.starte = States.REPORT
+        self.state = States.REPORT
 
-        if guest_trio is not None:
+        if trio_guest is not None:
             copy = attr.evolve(self)
-            guest_trio.start_soon(copy.save)
+            trio_guest.start_soon(copy.save)
 
     # def get_inventory_and_compare_it(self):
     #     """
@@ -469,3 +748,37 @@ class Model:
 
     #     # with open("debug/new_inventory.txt", 'w') as f:
     #     #     json.dump(self.newInventory.items, f, indent=3, ensure_ascii=False)
+
+
+@attr.mutable
+class _Model:
+    """
+    Save the application state
+    """
+
+    filepath: Path = attr.field(converter=Path)
+    current_key: None | APIKey = None
+    data: dict[APIKey, list[Snapshot]] = attr.field(factory=dict)
+
+    @classmethod
+    def from_file(cls, filepath: str | Path) -> _Model:
+        """
+        Deserialize a model from a file and make the model save itself
+        to this file
+        """
+        filepath = Path(filepath)
+
+        with filepath.open("rt", encoding="utf-8") as file:
+            obj = json.load(file)
+
+        if not isinstance(obj, dict):
+            raise ValueError(f"{filepath} does not contain a json object")
+
+        fields = utils.unjsonize(cls, obj, ignore=["filepath"])
+        return cls(filepath=filepath, **fields)
+
+    def save(self, indent=4, sort_keys=True, **kwargs):
+        """Save the model to the given file"""
+        obj = utils.jsonize(self, ignore=["filepath"])
+        with self.filepath.open("wt", encoding="utf-8") as file:
+            json.dump(obj, file, indent=indent, sort_keys=sort_keys, **kwargs)

@@ -16,7 +16,7 @@ import urllib.request
 from gw2_tracker import gw2_api
 
 
-class Report:
+class _Report:
     """The report gather the information to show to the user after the data comparison :
     - total earnings (liquid gold & aquisition value)
     - Detail of items :

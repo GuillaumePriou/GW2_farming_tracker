@@ -4,18 +4,26 @@ View layer of GW2 tool to evaluate gold earnings.
 
 @author: Krashnark
 """
+from __future__ import annotations
+
 import collections
+import functools
+import logging
 import tkinter as tk
-import traceback
 from importlib import abc, resources
+from pathlib import Path
 from tkinter import ttk
-from typing import Any, ClassVar, Literal
+from typing import Any, Callable, ClassVar, Literal
 
 import attr
 import outcome
-from PIL import Image, ImageTk
 
-from gw2_tracker import protocols, reports
+from gw2_tracker import models, protocols, utils
+
+# from PIL import Image, ImageTk
+
+
+LOGGER = logging.getLogger(__name__)
 
 ASSET_SOURCES = resources.files("gw2_tracker").joinpath("assets")
 
@@ -47,20 +55,22 @@ class TkTrioHost:
         # call a queued func
         self._queue.popleft()()
 
-    def run_sync_soon_threadsafe(self, func):
+    def run_sync_soon_threadsafe(self, func: Callable) -> None:
         self._queue.append(func)
         self._root.call("after", "idle", self._tk_func_name)
 
-    def run_sync_soon_not_threadsafe(self, func):
+    def run_sync_soon_not_threadsafe(self, func: Callable) -> None:
         self._queue.append(func)
         self._root.call("after", "idle", "after", 0, self._tk_func_name)
 
-    def done_callback(self, trio_outcome: outcome.Outcome):
-        # TODO: improve this, use logging
-        print(f"Outcome: {outcome}")
-        if isinstance(trio_outcome, outcome.Error):
-            exc = trio_outcome.error
-            traceback.print_exception(type(exc), exc, exc.__traceback__)
+    def done_callback(self, out: outcome.Outcome) -> None:
+        if isinstance(out, outcome.Error):
+            LOGGER.error(
+                "Trio loop raised the following exception:", exc_info=out.error
+            )
+        else:
+            LOGGER.debug(f"Trio loop cloed normally ({out})")
+        LOGGER.debug("Closing Tk event loop")
         self._root.destroy()
 
 
@@ -87,8 +97,8 @@ class ScrollableFrame(ttk.Frame):
         ttk.Frame
     """
 
-    canvas: tk.Canvas
-    scrollbar: ttk.Scrollbar
+    _canvas_: tk.Canvas
+    _scrollbar_: ttk.Scrollbar
 
     def __init__(
         self,
@@ -100,23 +110,23 @@ class ScrollableFrame(ttk.Frame):
         **kwargs,
     ):
         # Create a Canvas between this frame and its parent and add a scrollbar
-        self.canvas = tk.Canvas(parent, **(canvas_kws or {}))
-        self.scrollbar = ttk.Scrollbar(
-            self.canvas, orient=orient, **(scrollbar_kws or {})
+        self._canvas_ = tk.Canvas(parent, **(canvas_kws or {}))
+        self._scrollbar_ = ttk.Scrollbar(
+            self._canvas_, orient=orient, **(scrollbar_kws or {})
         )
         if orient == "vertical":
-            self.scrollbar.configure(command=self.canvas.yview)
-            self.canvas.configure(yscrollcommand=self.scrollbar.set)
-            self.scrollbar.pack(side="right", fill="y")
+            self._scrollbar_.configure(command=self._canvas_.yview)
+            self._canvas_.configure(yscrollcommand=self._scrollbar_.set)
+            self._scrollbar_.pack(side="right", fill="y")
         elif orient == "horizontal":
-            self.scrollbar.configure(command=self.canvas.xview)
-            self.canvas.configure(xscrollcommand=self.scrollbar.set)
-            self.scrollbar.pack(side="bottom", fill="x")
-        self.canvas.pack(side="left", fill="both", expand=True)
+            self._scrollbar_.configure(command=self._canvas_.xview)
+            self._canvas_.configure(xscrollcommand=self._scrollbar_.set)
+            self._scrollbar_.pack(side="bottom", fill="x")
+        self._canvas_.pack(side="left", fill="both", expand=True)
 
         # Actually initialise the frame and display it in the canvas
-        super().__init__(self.canvas, **kwargs)
-        self.canvas.create_window(
+        super().__init__(self._canvas_, **kwargs)
+        self._canvas_.create_window(
             0, 0, window=self, anchor="nw", tags="scrollable_frame"
         )
         self.bind("<Configure>", self._on_configure)
@@ -125,7 +135,7 @@ class ScrollableFrame(ttk.Frame):
         """
         Adapts the canvas when the frame is resized
         """
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self._canvas_.configure(scrollregion=self._canvas_.bbox("all"))
 
 
 class CoinWidget(ttk.Frame):
@@ -195,96 +205,135 @@ class GoldWidget(ttk.Frame):
         self.gold.amount = value // 10000
 
 
-class DetailsReportDisplay(ttk.Frame):
-    """A dedicated frame to display the details of item gained during a play session.
-    Information to be displayed in a table-like form :
+class ReportDetailsWidget(ttk.Frame):
+    """
+    Widget to display the details of the computed gains.
+
+    This widgets uses the ``grid`` display manager to display table-like
+    content. Information displayed are:
         - Item icon
         - Item id (for debug)
         - Item name
         - Item count
-        - Aquisition price
-        - Liquid gold value
-
-    Input : list of items (dict)
+        - Black lion price
+        - Vendor price
     """
 
-    def __init__(self, parent, items_list=[]):
+    _LEGENDS: ClassVar[tuple[str, ...]] = (
+        "ID",
+        "Name",
+        "Amount",
+        "Black lion value",
+        "Vendor value",
+    )
+
+    @attr.mutable
+    class _Row:
+        """Internal helper to handle a row"""
+
+        @staticmethod
+        @functools.lru_cache(512)
+        def _get_icon(path: Path):
+            # Cache icon to avoid reloading common items
+            return tk.PhotoImage(file=str(path))
+
+        parent: ReportDetailsWidget
+        row: int
+        icon: ttk.Label = attr.field(init=False)
+        id: ttk.Label = attr.field(init=False)
+        name: ttk.Label = attr.field(init=False)
+        count: ttk.Label = attr.field(init=False)
+        black_lion_price: ttk.Label = attr.field(init=False)
+        vendor_price: ttk.Label = attr.field(init=False)
+
+        def __attrs_post_init__(self):
+            for col, field in enumerate(
+                ("icon", "id", "name", "count", "black_lion_price", "vendor_price")
+            ):
+                widget = ttk.Label(self.parent, text="-")
+                widget.grid(row=self.row, column=col)
+                setattr(self, field, widget)
+
+        def update(self, item_detail: models.ItemDetail, count: int) -> None:
+            if item_detail.icon_path is not None:
+                self.icon.configure(image=self._get_icon(item_detail.icon_path))
+            self.id.configure(text=item_detail.id)
+            self.name.configure(text=item_detail.name)
+            self.count.configure(text=count)
+            if item_detail.value_black_lion:
+                self.black_lion_price.configure(text=item_detail.value_black_lion)
+            else:
+                self.black_lion_price.configure(text="-")
+            if item_detail.vendor_value > 0:
+                self.vendor_price.configure(text=item_detail.vendor_value)
+            else:
+                self.vendor_price.configure(text="-")
+
+        def destroy(self):
+            self.icon.destroy()
+            self.id.destroy()
+            self.name.destroy()
+            self.count.destroy()
+            self.black_lion_price.destroy()
+            self.vendor_price.destroy()
+
+    # Instance attributes
+    legends: tuple[ttk.Label, ...]
+    rows: list[_Row]
+
+    def __init__(self, parent, report: models.Report = None):
         super().__init__(parent)
 
         # Legends for the details
-        self.itemIdLegend1 = ttk.Label(self, text="ID objet")
-        self.itemIdLegend1.grid(row=0, column=1)
+        legends = []
+        for col, legend in enumerate(self._LEGENDS):
+            widget = ttk.Label(self, text=legend)
+            widget.grid(row=0, column=col + 1)
+            legends.append(widget)
+        self.legends = tuple(legends)
 
-        self.itemIdLegend2 = ttk.Label(self, text="Nom objet")
-        self.itemIdLegend2.grid(row=0, column=2)
+        self.rows = []
 
-        self.itemIdLegend3 = ttk.Label(self, text="Nombre objets")
-        self.itemIdLegend3.grid(row=0, column=3)
+        if report is not None:
+            self.update(report)
 
-        self.itemIdLegend4 = ttk.Label(self, text="Or liquide")
-        self.itemIdLegend4.grid(row=0, column=4)
+    def update(self, report: models.Report) -> None:
+        item_details = [
+            report.item_details[id_] for id_ in sorted(report.inv_diff.keys())
+        ]
+        item_counts = [report.inv_diff[detail.id] for detail in item_details]
+        # First re-use rows that already exist:
+        index = -1
+        for index, (row, detail, count) in enumerate(
+            zip(self.rows, item_details, item_counts)
+        ):
+            row.update(detail, count)
+        index += 1
 
-        self.itemIdLegend5 = ttk.Label(self, text="Cout aquisition")
-        self.itemIdLegend5.grid(row=0, column=5)
-
-        self.iconLabelList = list()
-
-        if items_list == []:
-            print("View : detail display report received an empty list of items.")
-            self.noItemLabel = ttk.Label(self, text="Aucun changement d'inventaire.")
-            self.noItemLabel.grid(row=1, column=0)
-        else:
-            rowNb = 0
-            print(f"item list to display : {items_list}")
-            for item in items_list:
-                rowNb += 1
-
-                idem_id = item["id"]
-                print(f"Create a row of labels for item {idem_id}")
-
-                # Display item icon (loaded from a file)
-                try:
-                    picture_path = "Download/" + str(item["id"]) + ".png"
-                    self.iconLabelList.append(
-                        self.build_image_label(self, picture_path)
-                    )
-                    self.iconLabelList[rowNb - 1].grid(row=rowNb, column=0)
-                except ValueError as error:
-                    self.iconLabel = ttk.Label(self, text="Image non trouvée")
-                    print(error)
-                    self.iconLabel.grid(row=rowNb, column=0)
-
-                # Display item id
-                idLabel = ttk.Label(self, text=item["id"])
-                idLabel.grid(row=rowNb, column=1)
-
-                # Display item name
-                nameLabel = ttk.Label(self, text=item["name"])
-                nameLabel.grid(row=rowNb, column=2)
-
-                # Display item count
-                countLabel = ttk.Label(self, text=item["count"])
-                countLabel.grid(row=rowNb, column=3)
-
-                # Display item liquid gold value
-                liquidGoldLabel = GoldWidget(self, item["liquid gold value"])
-                liquidGoldLabel.grid(row=rowNb, column=4)
-
-                # Display item aquisition price
-                aquisitionPriceLabel = GoldWidget(self, item["aquisition price"])
-                aquisitionPriceLabel.grid(row=rowNb, column=5)
-
-    def build_image_label(self, parent, picture_path):
-        print(f"try to open {picture_path}")
-        image = Image.open(picture_path)
-        photoImage = ImageTk.PhotoImage(image)
-        iconLabel = ttk.Label(parent, image=photoImage)
-        iconLabel.image = photoImage
-        return iconLabel
+        if index < len(item_details):
+            # Not enought rows to re-use, create new ones
+            for offset, (detail, count) in enumerate(
+                zip(item_details[index:], item_counts[index:])
+            ):
+                row = self._Row(self, index + offset + 1)
+                row.update(detail, count)
+                self.rows.append(row)
+        elif index > len(item_details):
+            # Too many rows, destroy & drop extra ones
+            for row in self.rows[index:]:
+                row.destroy()
+            self.rows = self.rows[:index]
 
 
-class FullReportDisplay(ttk.Frame):
-    """A dedicated frame to display the item gained during a play session.
+class FullReportWidget(ttk.Frame):
+    """
+    Widget to display a report.
+
+    This widget display the amount of gold earn, as well as the total gain
+    from coins and items, and delegates displaying the details.
+
+    Attributes:
+        A dedicated frame to display the item gained during a play session.
     Information to be displayed :
         At the top :
         - total gold value earned (aquisition & liquid)
@@ -299,60 +348,117 @@ class FullReportDisplay(ttk.Frame):
         - Liquid gold value
     """
 
-    def __init__(self, parent, report_to_display: reports.Report = None):
+    def __init__(self, parent, report: models.Report = None):
         super().__init__(parent)
         # self.farmTimeLabel = ttk.Label(text='Durée : à calculer')
         # self.farmTimeLabel.grid(row=0, column=0)
 
         # Total aquisition price display
-        self.label_tot_aquisition = ttk.Label(self, text="Prix à l'achat")
+        self.label_tot_aquisition = ttk.Label(self, text="Total gain")
         self.label_tot_aquisition.grid(row=0, column=0)
 
-        if report_to_display == None:
-            self.gold_tot_aquisition = GoldWidget(self, 0)
-        else:
-            self.gold_tot_aquisition = GoldWidget(
-                self, report_to_display.totalAquisitionValue
-            )
-        self.gold_tot_aquisition.grid(row=0, column=1)
+        self.gold_tot_acquisition = GoldWidget(self, 0)
+        self.gold_tot_acquisition.grid(row=0, column=1)
 
-        # Total liquid gold price display
-        self.label_tot_liquid = ttk.Label(self, text="Prix liquid gold")
+        self.label_tot_liquid = ttk.Label(self, text="Coin gain")
         self.label_tot_liquid.grid(row=0, column=2)
 
-        if report_to_display == None:
-            self.gold_tot_liquid = GoldWidget(self, 0)
-        else:
-            self.gold_tot_liquid = GoldWidget(
-                self, report_to_display.totalLiquidGoldValue
-            )
+        self.gold_tot_liquid = GoldWidget(self, 0)
         self.gold_tot_liquid.grid(row=0, column=3)
 
-        if report_to_display == None:
-            self.details = DetailsReportDisplay(self, [])
-        else:
-            self.details = DetailsReportDisplay(self, report_to_display.itemsDetail)
-        self.details.grid(row=1, column=0, columnspan=3)
+        self.widget_details = ReportDetailsWidget(self)
+        self.widget_details.grid(row=1, column=0, columnspan=3)
 
-        # print(f'report_to_display.totalAquisitionValue = {report_to_display.totalAquisitionValue}')
-        # print(f'report_to_display.totalLiquidGoldValue = {report_to_display.totalLiquidGoldValue}')
-        # print(f'report_to_display.itemsDetail = {report_to_display.itemsDetail}')
+        if report:
+            self.update(report)
 
-    def update_detail_display(self, new_report: reports.Report):
-        # re-init with new value
-        self.details.destroy()
-        self.details = DetailsReportDisplay(self, new_report.itemsDetail)
-        self.details.grid(row=1, column=0, columnspan=3)
+        # if report == None:
+        #     self.gold_tot_aquisition = Any
+        # else:
+        #     self.gold_tot_aquisition = GoldWidget(
+        #         self, report.totalAquisitionValue
+        #     )
+
+        # # Total liquid gold price display
+        # self.label_tot_liquid = ttk.Label(self, text="Prix liquid gold")
+        # self.label_tot_liquid.grid(row=0, column=2)
+
+        # if report == None:
+        #     self.gold_tot_liquid = GoldWidget(self, 0)
+        # else:
+        #     self.gold_tot_liquid = GoldWidget(
+        #         self, report.totalLiquidGoldValue
+        #     )
+
+        # if report == None:
+        #     self.details = DetailsReportDisplay(self, [])
+        # else:
+        #     self.details = DetailsReportDisplay(self, report.itemsDetail)
+
+    def update(self, report: models.Report):
+        # TODO: set the gold values
+        self.gold_tot_liquid.amount = report.coins
+        self.gold_tot_acquisition = report.total_gains
+        # Update details
+        self.widget_details.update(report)
 
 
-class TkView(protocols.ViewProto):
+class TkView:
+    """
+    Tk implementation of the View protocols.
+
+    Implements:
+        gw2_tracker.protocols.ViewProto
+    """
+
     root: tk.Tk
     controller: protocols.ControllerProto
+    host: TkTrioHost
 
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("GW2 farming tracker")
+        self.host = TkTrioHost(self.root)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
+
+    def _build(self):
+        # Define a big important message to help user to use the this application
+        print(ttk.Label)
+        self.label_main_message = ttk.Label(
+            self.root, text="Hello this is dog.", font="bold"
+        )
+        self.label_main_message.grid(row=0, column=0, columnspan=2)
+
+        # Entry widget where the user paste his API key
+        self.input_key = ttk.Entry(self.root, width=80)
+        self.input_key.grid(row=2, column=0)
+
+        self.button_key = ttk.Button(
+            self.root, text="Utiliser cette clé !", command=self._on_button_key
+        )
+        self.button_key.grid(row=2, column=2)
+
+        # Buttons to get inventories and calculate differences
+
+        self.button_start = ttk.Button(
+            self.root,
+            text="Get start snapshot",
+            state="disabled",
+            command=self._on_get_start_snapshot,
+        )
+        self.button_start.grid(row=4, column=0)
+
+        self.button_stop = ttk.Button(
+            self.root,
+            text="Compute gains",
+            state="disabled",
+            command=self._on_compute_gains,
+        )
+        self.button_stop.grid(row=4, column=1)
+
+        self.widget_report = FullReportWidget(self.root)
+        self.widget_report.grid(row=5, column=0, columnspan=3)
 
     def get_trio_host(self) -> TkTrioHost:
         return TkTrioHost(self.root)
@@ -363,75 +469,59 @@ class TkView(protocols.ViewProto):
     def start_ui(self) -> None:
         self.root.mainloop()
 
-    def _build(self):
+    def display_message(self, msg: str) -> None:
+        self.label_main_message.configure(text=msg, foreground="black")
 
-        # Define a big important message to help user to use the this application
-        self.label_main_message = ttk.Label(
-            self.root, text="Hello this is dog.", font="bold"
-        )
-        self.label_main_message.grid(row=0, column=0, columnspan=2)
+    def display_error(self, err: BaseException) -> None:
+        # TODO: this is a hack, error should be logged before
+        LOGGER.error(utils.err_traceback(err))
+        self.label_main_message.configure(text=utils.err_str(err), foreground="red")
 
-        # Entry widget where the user paste his API key
-        self.input_key = ttk.Entry(self.root, width=80)
-        self.input_key.grid(row=2, column=0)
+    def display_key(self, key: models.APIKey) -> None:
+        self.input_key.delete(0, tk.END)
+        self.input_key.insert(0, key)
 
-        self.button_ok = ttk.Button(
-            self.root, text="Utiliser cette clé !", command=self.save_key
-        )
-        self.button_ok.grid(row=2, column=2)
+    ###
 
-        # Buttons to get inventories and calculate differences
+    def _on_close(self) -> None:
+        if hasattr(self, "controller"):
+            self.controller.close_app()
+        else:
+            # No controller, close the windows normally as there is no
+            # trio loop to close
+            self.root.destroy()
 
-        self.button_start = ttk.Button(
-            self.root, text="Commencer", command=self.set_reference
-        )
-        self.button_start.grid(row=4, column=0)
+    def _on_button_key(self) -> None:
+        if self.controller is None:
+            raise RuntimeError("No controller")
 
-        self.button_stop = ttk.Button(
-            self.root, text="Calculer les gains", command=self.compute_gains
-        )
-        self.button_stop.grid(row=4, column=1)
+        LOGGER.debug("Clicked save api key button")
+        self.display_message("Verifying key ...")
+        self.button_key.configure(state="disabled")
+        self.controller.use_key(models.APIKey(self.input_key.get()))
 
-        self.display_report = FullReportDisplay(self.root)
-        self.display_report.grid(row=5, column=0, columnspan=3)
+    def enable_key_input(self) -> None:
+        self.button_key.configure(state="normal")
 
-    def refresh_api_key_entry_content(self, value_from_model):
-        self.input_key.insert(0, value_from_model)
+    def _on_get_start_snapshot(self) -> None:
+        if self.controller is None:
+            raise RuntimeError("No controller")
+        self.display_message("Retrieving starting snapshot...")
+        self.button_start.configure(state="disabled")
+        self.controller.get_start_snapshot()
 
-    # Some functions to update message of big important message label
-    def show_action_in_progress(self, msg):  # Does
-        print("yellow !!")
-        self.label_main_message.config(text=msg)
-        self.label_main_message["foreground"] = "yellow"
+    def enable_get_start_snapshot(self) -> None:
+        self.button_start.configure(state="normal")
 
-    def show_success(self, msg):
-        self.label_main_message["text"] = msg
-        self.label_main_message["foreground"] = "green"
-
-    def show_error(self, msg):
-        self.label_main_message["text"] = msg
-        self.label_main_message["foreground"] = "red"
-
-    # API key input management
-    def save_key(self):
-        print("Cliqué sur le bouton save api key")
-        self.show_action_in_progress("Vérification de la clé...")
-        if self.controller:
-            self.controller.save_api_key(self.input_key.get())
-
-    # Reference  inventory fetch management
-    def set_reference(self):
-        self.controller.set_reference_inventory()
-
-    # Compute gains management
-    def compute_gains(self):
-        print("View : begin compute gains")
+    def _on_compute_gains(self):
+        if self.controller is None:
+            raise RuntimeError("No controller")
+        self.display_message("Computing gains...")
+        self.button_stop.configure(state="disabled")
         self.controller.compute_gains()
-        print("View : end compute gains")
-        # self.report = ReportDisplay(self.controller.compute_gains())
-        # self.report.grid(row=5, column=0, columnspan=5)
 
-    def show_report(self, report):
-        print("View : begin report display")
-        self.show_report.update_detail_display(report)
-        print("View : end report display")
+    def enable_compute_gains(self) -> None:
+        self.button_stop.configure(state="normal")
+
+    def display_report(self, report: models.Report) -> None:
+        self.widget_report.update(report)

@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
+import logging
 from pathlib import Path
 
 from gw2_tracker import controllers, models, protocols, views
+
+LOGGER = logging.getLogger(__name__)
 
 
 class GW2Tracker:
@@ -11,8 +14,14 @@ class GW2Tracker:
 
     def __init__(self, model_file: Path, cache_dir: Path):
         if model_file.is_file():
-            self.model = models.Model.from_file(model_file)
-        else:
+            try:
+                self.model = models.Model.from_file(model_file)
+            except Exception as err:
+                LOGGER.error(
+                    f"Could not reload saved state from {model_file}, creating new one",
+                    exc_info=err,
+                )
+        if not hasattr(self, "model"):
             model_file.parent.mkdir(parents=True, exist_ok=True)
             self.model = models.Model(model_file)
         self.view = views.TkView()
