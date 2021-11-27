@@ -20,7 +20,7 @@ import outcome
 
 from gw2_tracker import models, protocols, utils
 
-# from PIL import Image, ImageTk
+ttk.Frame = ttk.LabelFrame
 
 
 LOGGER = logging.getLogger(__name__)
@@ -254,7 +254,7 @@ class ReportDetailsWidget(ttk.Frame):
                 widget.grid(row=self.row, column=col)
                 setattr(self, field, widget)
 
-        def update(self, item_detail: models.ItemDetail, count: int) -> None:
+        async def update(self, item_detail: models.ItemDetail, count: int) -> None:
             if item_detail.icon_path is not None:
                 self.icon.configure(image=self._get_icon(item_detail.icon_path))
             self.id.configure(text=item_detail.id)
@@ -292,12 +292,9 @@ class ReportDetailsWidget(ttk.Frame):
             legends.append(widget)
         self.legends = tuple(legends)
 
-        self.rows = []
+        self.rows = [self._Row(self, 1)]
 
-        if report is not None:
-            self.update(report)
-
-    def update(self, report: models.Report) -> None:
+    async def update(self, report: models.Report) -> None:
         item_details = [
             report.item_details[id_] for id_ in sorted(report.inv_diff.keys())
         ]
@@ -307,7 +304,7 @@ class ReportDetailsWidget(ttk.Frame):
         for index, (row, detail, count) in enumerate(
             zip(self.rows, item_details, item_counts)
         ):
-            row.update(detail, count)
+            await row.update(detail, count)
         index += 1
 
         if index < len(item_details):
@@ -316,8 +313,8 @@ class ReportDetailsWidget(ttk.Frame):
                 zip(item_details[index:], item_counts[index:])
             ):
                 row = self._Row(self, index + offset + 1)
-                row.update(detail, count)
                 self.rows.append(row)
+                await row.update(detail, count)
         elif index > len(item_details):
             # Too many rows, destroy & drop extra ones
             for row in self.rows[index:]:
@@ -348,7 +345,7 @@ class FullReportWidget(ttk.Frame):
         - Liquid gold value
     """
 
-    def __init__(self, parent, report: models.Report = None):
+    def __init__(self, parent):
         super().__init__(parent)
         # self.farmTimeLabel = ttk.Label(text='Durée : à calculer')
         # self.farmTimeLabel.grid(row=0, column=0)
@@ -367,10 +364,7 @@ class FullReportWidget(ttk.Frame):
         self.gold_tot_liquid.grid(row=0, column=3)
 
         self.widget_details = ReportDetailsWidget(self)
-        self.widget_details.grid(row=1, column=0, columnspan=3)
-
-        if report:
-            self.update(report)
+        self.widget_details.grid(row=1, column=0, columnspan=4)
 
         # if report == None:
         #     self.gold_tot_aquisition = Any
@@ -395,12 +389,12 @@ class FullReportWidget(ttk.Frame):
         # else:
         #     self.details = DetailsReportDisplay(self, report.itemsDetail)
 
-    def update(self, report: models.Report):
+    async def update(self, report: models.Report):
         # TODO: set the gold values
         self.gold_tot_liquid.amount = report.coins
         self.gold_tot_acquisition = report.total_gains
         # Update details
-        self.widget_details.update(report)
+        await self.widget_details.update(report)
 
 
 class TkView:
@@ -424,20 +418,19 @@ class TkView:
 
     def _build(self):
         # Define a big important message to help user to use the this application
-        print(ttk.Label)
         self.label_main_message = ttk.Label(
             self.root, text="Hello this is dog.", font="bold"
         )
-        self.label_main_message.grid(row=0, column=0, columnspan=2)
+        self.label_main_message.grid(row=0, column=0, columnspan=3)
 
         # Entry widget where the user paste his API key
         self.input_key = ttk.Entry(self.root, width=80)
-        self.input_key.grid(row=2, column=0)
+        self.input_key.grid(row=1, column=0, columnspan=2)
 
         self.button_key = ttk.Button(
-            self.root, text="Utiliser cette clé !", command=self._on_button_key
+            self.root, text="Use key", command=self._on_button_key
         )
-        self.button_key.grid(row=2, column=2)
+        self.button_key.grid(row=1, column=2)
 
         # Buttons to get inventories and calculate differences
 
@@ -447,7 +440,7 @@ class TkView:
             state="disabled",
             command=self._on_get_start_snapshot,
         )
-        self.button_start.grid(row=4, column=0)
+        self.button_start.grid(row=2, column=0)
 
         self.button_stop = ttk.Button(
             self.root,
@@ -455,10 +448,10 @@ class TkView:
             state="disabled",
             command=self._on_compute_gains,
         )
-        self.button_stop.grid(row=4, column=1)
+        self.button_stop.grid(row=2, column=2)
 
         self.widget_report = FullReportWidget(self.root)
-        self.widget_report.grid(row=5, column=0, columnspan=3)
+        self.widget_report.grid(row=3, column=0, columnspan=3)
 
     def get_trio_host(self) -> TkTrioHost:
         return TkTrioHost(self.root)
@@ -467,6 +460,7 @@ class TkView:
         self.controller = controller
 
     def start_ui(self) -> None:
+        self.root.after(500, self.controller.on_ui_start)
         self.root.mainloop()
 
     def display_message(self, msg: str) -> None:
@@ -523,5 +517,5 @@ class TkView:
     def enable_compute_gains(self) -> None:
         self.button_stop.configure(state="normal")
 
-    def display_report(self, report: models.Report) -> None:
-        self.widget_report.update(report)
+    async def display_report(self, report: models.Report) -> None:
+        await self.widget_report.update(report)

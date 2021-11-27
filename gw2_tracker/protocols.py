@@ -82,11 +82,15 @@ class ControllerProto(Protocol):
     The view will call this protocol upon UI interaction
     """
 
-    def __init__(self, model: models.Model, view: ViewProto):
+    def __init__(self, cache: models.Cache, model: models.Model, view: ViewProto):
         ...
 
-    def start_trio_guest(self, host: TrioHostProto):
+    def start_trio_guest(self, host: TrioHostProto) -> None:
         """Starts trio in guest mode"""
+        ...
+
+    def on_ui_start(self) -> None:
+        """Called by the view to notifyy the controller that the UI is available"""
         ...
 
     def close_app(self):
@@ -152,7 +156,7 @@ class ViewProto(Protocol):
         """Display the current used API key"""
         ...
 
-    def display_report(self, report: models.Report) -> None:
+    async def display_report(self, report: models.Report) -> None:
         """Display a report"""
         ...
 

@@ -159,13 +159,6 @@ def jsonize(inst, *, ignore: abc.Container[str] = ()) -> dict[str, Any]:
         return value
 
     return attr.asdict(inst, recurse=True, filter=filter, value_serializer=serializer)
-    return {
-        f.name: value.to_json()
-        if hasattr((value := getattr(instance, f.name)), "to_json")
-        else value
-        for f in attr.fields(type(instance))
-        if f.name not in ignore
-    }
 
 
 def err_str(err: BaseException) -> str:
@@ -245,9 +238,10 @@ def unjsonize(
             #        # simple class type annotations
             #        fields[name] = tp.from_json(obj[name]) # type: ignore
             if orig is typing.Union or orig is types.UnionType:
-                if len(args) == 2 and None in args:
-                    # extract the type from the Optional[tp] or Union[None, tp] or None | tp
-                    tp = next(filter(None, args))
+                if len(args) == 2 and type(None) in args:
+                    if obj[name] is not None:
+                        # extract the type from the Optional[tp] or Union[None, tp] or None | tp
+                        tp = next(t for t in args if t is not type(None))
             if isinstance(tp, type) and hasattr(tp, "from_json"):
                 fields[name] = tp.from_json(obj[name])  # type: ignore
             else:

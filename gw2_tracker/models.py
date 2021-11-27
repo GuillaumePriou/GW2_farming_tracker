@@ -22,8 +22,10 @@ from collections import abc
 from pathlib import Path
 from typing import IO, Any, ClassVar, Iterable, Mapping, NewType, TypeAlias, TypedDict
 
+import asks
 import attr
 import pendulum
+import yarl
 from pendulum.datetime import DateTime
 
 from gw2_tracker import protocols, utils
@@ -64,7 +66,7 @@ class ItemData(TypedDict):
 
 
 @attr.frozen
-class Inventory(abc.Mapping[str, int]):
+class Inventory(abc.Mapping[ItemID, int]):
     """
     Immutable mapping from string ID to non-zero amounts
 
@@ -76,7 +78,7 @@ class Inventory(abc.Mapping[str, int]):
     difference of the compared set to 0.
     """
 
-    content: Mapping[str, int] = attr.field(factory=dict)
+    content: Mapping[ItemID, int] = attr.field(factory=dict)
 
     @classmethod
     def from_file(cls, file: str | Path | IO[bytes] | IO[str]) -> Inventory:
@@ -130,9 +132,10 @@ class Inventory(abc.Mapping[str, int]):
             types.MappingProxyType({k: v for k, v in self.content.items() if v}),
         )
 
-    def to_json(self) -> dict[str, int]:
+    def to_json(self) -> utils.JsonObject:
         """Serialize the instance to json format"""
-        return dict(self.content)
+        # ItemID are str at runtime, ignore the invariance problem
+        return dict(self.content)  # type: ignore
 
     def to_file(
         self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs
@@ -153,13 +156,13 @@ class Inventory(abc.Mapping[str, int]):
             with Path(file).open("wt", encoding="utf-8") as fp:
                 json.dump(content, fp, **kwargs)
 
-    def __getitem__(self, key: str) -> int:
+    def __getitem__(self, key: ItemID) -> int:
         return self.content[key]
 
     def __len__(self) -> int:
         return len(self.content)
 
-    def __iter__(self) -> abc.Iterator[str]:
+    def __iter__(self) -> abc.Iterator[ItemID]:
         return iter(self.content)
 
     def __add__(self, other: Inventory) -> Inventory:
@@ -313,7 +316,7 @@ class ItemDetail:
 
     BLACK_LION_FEE: ClassVar[float] = 0.15
 
-    id: str
+    id: ItemID
     name: str
     vendor_value: int
     highest_buy: None | int
@@ -439,13 +442,13 @@ class Report:
     """
 
     _DATETIME_FIELDS: ClassVar[Iterable[str]] = ("start_date", "end_date")
-    _COIN_ID: ClassVar[str] = "1"
+    _COIN_ID: ClassVar[ItemID] = ItemID("1")
 
     start_date: DateTime
     end_date: DateTime
     inv_diff: Inventory
     wallet_diff: Inventory
-    item_details: Mapping[str, ItemDetail]
+    item_details: Mapping[ItemID, ItemDetail]
 
     def __attrs_post_init__(self):
         if not (self.inv_diff.keys() <= self.item_details.keys()):
@@ -552,15 +555,34 @@ class Cache:
     Handles API data cached by the app
     """
 
-    dirpath: Path = attr.field(converter=Path)
-    item_data: dict[ItemID, ItemData] = attr.field(factory=dict)
-    images: list[ItemID] = attr.field(factory=list)
+    dir: Path = attr.field(converter=Path)
+    images: dict[ItemID, Path] = attr.field(factory=dict)
 
-    # @classmethod
-    # def from_dir(cls, dirpath: Path) -> Cache:
-    #    # TODO
-    #
-    #    pass
+    def __attrs_post_init__(self):
+        self.dir.mkdir(exist_ok=True, parents=True)
+
+    @classmethod
+    def from_dir(cls, dir: Path) -> Cache:
+        if not dir.is_dir():
+            raise NotADirectoryError(f"{dir}")
+        images = {ItemID(f.stem): f for f in dir.glob("*.png")}
+        return Cache(dir, images)
+
+    async def ensure_icons(
+        self, session: asks.Session, item_data: Mapping[ItemID, ItemData]
+    ) -> None:
+        missing_ids = item_data.keys() - self.images.keys()
+        urls = {yarl.URL(item_data[id_]["icon"]): id_ for id_ in missing_ids}
+
+        # deferred import to avoid circular dependency
+        from gw2_tracker import gw2_api
+
+        downloads = await gw2_api.download_images(session, list(urls.keys()), self.dir)
+
+        self.images.update({urls[url]: path for url, path in downloads.items()})
+
+    def get_image(self, item_id: ItemID) -> None | Path:
+        return self.images.get(item_id)
 
 
 class States(enum.IntEnum):
@@ -618,10 +640,9 @@ class Model:
 
     def to_file(self, indent=4, sort_keys=True, **kwargs) -> None:
         """Serialize the instance to it's file"""
+        content = self.to_json()
         with self.filepath.open("wt", encoding="utf-8") as file:
-            json.dump(
-                self.to_json(), file, indent=indent, sort_keys=sort_keys, **kwargs
-            )
+            json.dump(content, file, indent=indent, sort_keys=sort_keys, **kwargs)
 
     async def save(self) -> None:
         """Asynchronously save this instance"""
@@ -638,8 +659,12 @@ class Model:
             trio_guest: is not None, schedule an asynchronous save of the
                 modified models with this object
         """
-        self.state = States.KEY
-        self.current_key = key
+        if key != self.current_key:
+            self.state = States.KEY
+            self.current_key = key
+            self.start_snapshot = None
+            self.end_snapshot = None
+            self.report = None
 
         if trio_guest is not None:
             copy = attr.evolve(self)
@@ -666,6 +691,8 @@ class Model:
 
         self.start_snapshot = snapshot
         self.state = States.SNAP_START
+        self.end_snapshot = None
+        self.report = None
 
         if trio_guest is not None:
             copy = attr.evolve(self)

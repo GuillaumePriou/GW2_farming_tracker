@@ -13,6 +13,14 @@ class GW2Tracker:
     view: protocols.ViewProto
 
     def __init__(self, model_file: Path, cache_dir: Path):
+        # Create cache
+        if cache_dir.is_file():
+            raise FileExistsError(f"{cache_dir=} should be a directory but is a file")
+        if cache_dir.is_dir():
+            cache = models.Cache.from_dir(cache_dir)
+        else:
+            cache = models.Cache(cache_dir)
+        # Init model
         if model_file.is_file():
             try:
                 self.model = models.Model.from_file(model_file)
@@ -24,8 +32,9 @@ class GW2Tracker:
         if not hasattr(self, "model"):
             model_file.parent.mkdir(parents=True, exist_ok=True)
             self.model = models.Model(model_file)
+        # Init view and controller
         self.view = views.TkView()
-        self.controller = controllers.Controller(self.model, self.view)
+        self.controller = controllers.Controller(cache, self.model, self.view)
         self.view.set_controller(self.controller)
 
     def start(self):

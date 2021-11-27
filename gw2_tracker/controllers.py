@@ -20,6 +20,8 @@ _MESSAGES = {
     models.States.STARTED: "Welcome. Enter a valid GW2 API key",
     models.States.KEY: "Key is valid. Click to save start inventory",
     models.States.SNAP_START: "Start inventory saved. Click to compute gains",
+    models.States.SNAP_END: "No report found, click to generate one",
+    models.States.REPORT: "Report is displayed below",
 }
 
 P = ParamSpec("P")
@@ -42,45 +44,66 @@ class TrioGuest:
         )
 
     async def _main(self):
-        self.session = asks.Session(connections=20)
-        async with trio.open_nursery() as nursery:
-            self.nursery = nursery
-            self.started = True
-            nursery.start_soon(trio.sleep_forever)
+        self.session = asks.Session(connections=50)
+        try:
+            async with trio.open_nursery() as nursery:
+                self.nursery = nursery
+                self.started = True
+                nursery.start_soon(trio.sleep_forever)
+        except Exception as err:
+            LOGGER.error("!! Trio crashed and couldn't be rescued !!", exc_info=err)
+            raise
+
+    async def _wrap(
+        self, task: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
+    ):
+        try:
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(task, *args)
+        except Exception as err:
+            LOGGER.error(
+                "!! Scheduled trio task crashed !! Rescued the trio loop", exc_info=err
+            )
 
     def start_soon(
         self, task: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
-    ):
+    ) -> None:
         if kwargs:
             raise RuntimeError("trio.Nursery.start_soon doesn't support kwargs")
-        # self.nursery.start_soon(task, *args)
-        self.nursery.parent_task.context.run(self.nursery.start_soon, task, *args)
+        # Standard call is somewhat incorrect: pur trio works, but sniffio
+        # (used internally by asks) cannot detect that it is running in trio.
+        # The following invocation was proposed on Gitter and works
+        ## self.nursery.start_soon(task, *args)
+        self.nursery.parent_task.context.run(
+            self.nursery.start_soon, self._wrap, task, *args
+        )
 
 
 class Controller:
+    cache: models.Cache
     model: models.Model
     view: protocols.ViewProto
     trio_guest: TrioGuest
 
-    def __init__(self, model: models.Model, view: protocols.ViewProto):
+    def __init__(
+        self, cache: models.Cache, model: models.Model, view: protocols.ViewProto
+    ):
+        self.cache = cache
         self.model = model
         self.view = view
         self.trio_guest = TrioGuest()
-
-        if self.model.current_key is not None:
-            self.view.display_key(self.model.current_key)
-
-        self._update_view()
 
     def _update_view(self):
         if self.model.state >= models.States.KEY:
             self.view.enable_get_start_snapshot()
         if self.model.state >= models.States.SNAP_START:
             self.view.enable_compute_gains()
+        if self.model.state >= models.States.REPORT and self.model.report is not None:
+            self.trio_guest.start_soon(self.view.display_report, self.model.report)
         if self.model.state in _MESSAGES:
             self.view.display_message(_MESSAGES[self.model.state])
 
-    def start_trio_guest(self, host: protocols.TrioHostProto):
+    def start_trio_guest(self, host: protocols.TrioHostProto) -> None:
         if self.trio_guest.host is not None:
             if not self.trio_guest.started:
                 msg = "guest-mode trio is currently starting"
@@ -89,6 +112,14 @@ class Controller:
             msg += f" with host {self.trio_guest.host}"
             raise RuntimeError(msg)
         self.trio_guest.run_in(host)
+
+    def on_ui_start(self) -> None:
+        # refresh the view on startup, once every event loop is started
+        # and available
+        LOGGER.debug("Startup view refresh !")
+        if self.model.current_key is not None:
+            self.view.display_key(self.model.current_key)
+        self._update_view()
 
     def close_app(self):
         LOGGER.debug("closing the app: cancelling trio event loop...")
@@ -169,14 +200,16 @@ class Controller:
 
             LOGGER.info("retrieving item data...")
             self.view.display_message("Retrieving item data...")
-            # TODO: use cache and cache item data
-            # await self.cache.ensure_cached(inv_diff.keys())
             item_data, prices = await utils.gather(
                 gw2_api.get_items_data(self.trio_guest.session, list(inv_diff.keys())),
                 gw2_api.get_items_prices(
                     self.trio_guest.session, list(inv_diff.keys())
                 ),
             )
+
+            LOGGER.info("Downloading missing icons...")
+            self.view.display_message("Downloading missing icons...")
+            await self.cache.ensure_icons(self.trio_guest.session, item_data)
 
             LOGGER.info("computing report...")
             item_details = {
@@ -197,5 +230,11 @@ class Controller:
                 item_details=item_details,
             )
             self.model.set_report(report, trio_guest=self.trio_guest)
+
+            LOGGER.info("Displaying report...")
+            self.view.display_message("Displaying report...")
+            await self.view.display_report(report)
+
+            LOGGER.info("done")
+            self.view.display_message("Report is displayed bellow")
             self.view.enable_compute_gains()
-            self.view.display_report(report)

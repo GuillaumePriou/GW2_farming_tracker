@@ -210,7 +210,7 @@ def is_key_valide_sync(key: models.APIKey) -> bool:
         return False
 
 
-def _unwrap_slot(slot: _Slot) -> tuple[str, int]:
+def _unwrap_slot(slot: _Slot) -> tuple[models.ItemID, int]:
     """
     Unwrap a slots to a tuple, usable to init a dictionary
 
@@ -223,10 +223,10 @@ def _unwrap_slot(slot: _Slot) -> tuple[str, int]:
                 break
         else:
             raise ValueError(f"Invalid slot: <{slot}>")
-    return str(slot["id"]), count
+    return models.ItemID(str(slot["id"])), count
 
 
-def _slots_to_dict(slots: list[_Slot]) -> dict[str, int]:
+def _slots_to_dict(slots: list[_Slot]) -> dict[models.ItemID, int]:
     try:
         return dict(map(_unwrap_slot, filter(None, slots)))
     except ValueError as err:
@@ -327,8 +327,8 @@ async def get_snapshot(session: asks.Session, key: models.APIKey) -> models.Snap
 
 
 async def get_items_prices(
-    session: asks.Session, item_ids: list[str]
-) -> dict[str, tuple[None | int, None | int]]:
+    session: asks.Session, item_ids: list[models.ItemID]
+) -> dict[models.ItemID, tuple[None | int, None | int]]:
     """
     get the highest buy offer and lowest sell offer of items
     """
@@ -338,7 +338,7 @@ async def get_items_prices(
     url = _URLS.ITEM_PRICES % {"ids": ",".join(item_ids)}
     listings: list[_ItemPrices] = await call_api(session, url)
     return {
-        str(data["id"]): (
+        models.ItemID(str(data["id"])): (
             data.get("buys", {}).get("unit_price"),
             data.get("sells", {}).get("unit_price"),
         )
@@ -347,8 +347,8 @@ async def get_items_prices(
 
 
 async def get_items_data(
-    session: asks.Session, item_ids: list[str]
-) -> dict[str, models.ItemData]:
+    session: asks.Session, item_ids: list[models.ItemID]
+) -> dict[models.ItemID, models.ItemData]:
     if not item_ids:
         return {}
     url = _URLS.ITEM_DATA % {"ids": ",".join(item_ids)}
@@ -356,24 +356,35 @@ async def get_items_data(
     for d in data:
         if _FLAG_NO_SELL in d["flags"]:
             d["vendor_value"] = 0
-    return {str(d["id"]): d for d in data}
+    return {models.ItemID(str(d["id"])): d for d in data}
 
 
 async def download_images(
     session: asks.Session, urls: list[yarl.URL], target_dir: Path
-):
+) -> dict[yarl.URL, Path]:
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    async def download_image(session: asks.Session, url: yarl.URL, target_dir: Path):
+    result: dict[yarl.URL, Path] = {}
+
+    async def download_image(
+        session: asks.Session,
+        url: yarl.URL,
+        target_dir: Path,
+        result: dict[yarl.URL, Path],
+    ):
+        path = target_dir / url.name
         r = await session.get(str(url), stream=True)
-        async with await trio.open_file(target_dir / url.name, "wb") as file:
+        async with await trio.open_file(path, "wb") as file:
             async with r.body as content:
                 async for chunk in content:
                     await file.write(chunk)
+        result[url] = path
 
     async with trio.open_nursery() as nursery:
         for url in urls:
-            nursery.start_soon(download_image, session, url, target_dir)
+            nursery.start_soon(download_image, session, url, target_dir, result)
+
+    return result
 
 
 def GW2_API_handler(url, api_key=""):
