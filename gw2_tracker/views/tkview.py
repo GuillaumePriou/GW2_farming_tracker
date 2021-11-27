@@ -20,9 +20,6 @@ import outcome
 
 from gw2_tracker import models, protocols, utils
 
-ttk.Frame = ttk.LabelFrame
-
-
 LOGGER = logging.getLogger(__name__)
 
 ASSET_SOURCES = resources.files("gw2_tracker").joinpath("assets")
@@ -99,6 +96,7 @@ class ScrollableFrame(ttk.Frame):
 
     _canvas_: tk.Canvas
     _scrollbar_: ttk.Scrollbar
+    _methods_: dict[str, Callable]
 
     def __init__(
         self,
@@ -122,7 +120,7 @@ class ScrollableFrame(ttk.Frame):
             self._scrollbar_.configure(command=self._canvas_.xview)
             self._canvas_.configure(xscrollcommand=self._scrollbar_.set)
             self._scrollbar_.pack(side="bottom", fill="x")
-        self._canvas_.pack(side="left", fill="both", expand=True)
+        self._replace_methods()
 
         # Actually initialise the frame and display it in the canvas
         super().__init__(self._canvas_, **kwargs)
@@ -131,6 +129,12 @@ class ScrollableFrame(ttk.Frame):
         )
         self.bind("<Configure>", self._on_configure)
 
+    def _replace_methods(self):
+        self._methods_ = {}
+        for name in ("pack", "grid"):
+            self._methods_[name] = getattr(self, name)
+            setattr(self, name, getattr(self._canvas_, name))
+
     def _on_configure(self, event):
         """
         Adapts the canvas when the frame is resized
@@ -138,7 +142,7 @@ class ScrollableFrame(ttk.Frame):
         self._canvas_.configure(scrollregion=self._canvas_.bbox("all"))
 
 
-class CoinWidget(ttk.Frame):
+class _SingleCoinWidget(ttk.Frame):
     """Widget displaying a single coin"""
 
     IMAGE_CACHE: ClassVar[dict[abc.Traversable, tk.PhotoImage]] = {}
@@ -175,17 +179,17 @@ class CoinWidget(ttk.Frame):
         self.label.config(text=self._amount)
 
 
-class GoldWidget(ttk.Frame):
-    copper: CoinWidget
-    silver: CoinWidget
-    gold: CoinWidget
+class CoinWidget(ttk.Frame):
+    copper: _SingleCoinWidget
+    silver: _SingleCoinWidget
+    gold: _SingleCoinWidget
 
     def __init__(self, parent, amount=0):
         super().__init__(parent)
 
-        self.copper = CoinWidget(self, ASSETS["copper"])
-        self.silver = CoinWidget(self, ASSETS["silver"])
-        self.gold = CoinWidget(self, ASSETS["gold"])
+        self.copper = _SingleCoinWidget(self, ASSETS["copper"])
+        self.silver = _SingleCoinWidget(self, ASSETS["silver"])
+        self.gold = _SingleCoinWidget(self, ASSETS["gold"])
 
         self.gold.pack(side="left")
         self.silver.pack(side="left")
@@ -243,15 +247,19 @@ class ReportDetailsWidget(ttk.Frame):
         id: ttk.Label = attr.field(init=False)
         name: ttk.Label = attr.field(init=False)
         count: ttk.Label = attr.field(init=False)
-        black_lion_price: ttk.Label = attr.field(init=False)
-        vendor_price: ttk.Label = attr.field(init=False)
+        black_lion_price: CoinWidget = attr.field(init=False)
+        vendor_price: CoinWidget = attr.field(init=False)
 
         def __attrs_post_init__(self):
-            for col, field in enumerate(
-                ("icon", "id", "name", "count", "black_lion_price", "vendor_price")
-            ):
+            col = -1
+            for col, field in enumerate(("icon", "id", "name", "count")):
                 widget = ttk.Label(self.parent, text="-")
                 widget.grid(row=self.row, column=col)
+                setattr(self, field, widget)
+            offset = col + 1
+            for col, field in enumerate(("black_lion_price", "vendor_price")):
+                widget = CoinWidget(self.parent, amount=0)
+                widget.grid(row=self.row, column=col + offset)
                 setattr(self, field, widget)
 
         async def update(self, item_detail: models.ItemDetail, count: int) -> None:
@@ -261,13 +269,10 @@ class ReportDetailsWidget(ttk.Frame):
             self.name.configure(text=item_detail.name)
             self.count.configure(text=count)
             if item_detail.value_black_lion:
-                self.black_lion_price.configure(text=item_detail.value_black_lion)
+                self.black_lion_price.amount = item_detail.value_black_lion
             else:
-                self.black_lion_price.configure(text="-")
-            if item_detail.vendor_value > 0:
-                self.vendor_price.configure(text=item_detail.vendor_value)
-            else:
-                self.vendor_price.configure(text="-")
+                self.black_lion_price.amount = 0
+            self.vendor_price.amount = item_detail.vendor_value
 
         def destroy(self):
             self.icon.destroy()
@@ -354,13 +359,13 @@ class FullReportWidget(ttk.Frame):
         self.label_tot_aquisition = ttk.Label(self, text="Total gain")
         self.label_tot_aquisition.grid(row=0, column=0)
 
-        self.gold_tot_acquisition = GoldWidget(self, 0)
+        self.gold_tot_acquisition = CoinWidget(self, 0)
         self.gold_tot_acquisition.grid(row=0, column=1)
 
         self.label_tot_liquid = ttk.Label(self, text="Coin gain")
         self.label_tot_liquid.grid(row=0, column=2)
 
-        self.gold_tot_liquid = GoldWidget(self, 0)
+        self.gold_tot_liquid = CoinWidget(self, 0)
         self.gold_tot_liquid.grid(row=0, column=3)
 
         self.widget_details = ReportDetailsWidget(self)
@@ -392,7 +397,7 @@ class FullReportWidget(ttk.Frame):
     async def update(self, report: models.Report):
         # TODO: set the gold values
         self.gold_tot_liquid.amount = report.coins
-        self.gold_tot_acquisition = report.total_gains
+        self.gold_tot_acquisition.amount = report.total_gains
         # Update details
         await self.widget_details.update(report)
 

@@ -269,7 +269,7 @@ class Snapshot:
 
         fields = utils.unjsonize(cls, obj)
         fields["key"] = APIKey(fields["key"])
-        fields["datetime"] = DateTime, pendulum.parser.parse(fields["datetime"])
+        fields["datetime"] = pendulum.parser.parse(fields["datetime"])
         return cls(**fields)
 
     def to_json(self) -> utils.JsonObject:
@@ -298,7 +298,8 @@ class Snapshot:
                 json.dump(content, fp, **kwargs)
 
 
-@attr.frozen
+# functools.cached_properties uses __dict__, cannot use slots
+@attr.frozen(slots=False)
 class ItemDetail:
     """
     Data kept in reports
@@ -363,12 +364,12 @@ class ItemDetail:
         if not isinstance(obj, dict):
             raise ValueError(f"expected a JSON object, got {obj}")
 
-        fields = utils.unjsonize(cls, obj)
+        fields = utils.unjsonize(cls, obj, ignore=["icon_path"])
         return cls(**fields)
 
     def to_json(self) -> utils.JsonObject:
         """Serialize the instance to JSON"""
-        return utils.jsonize(self)
+        return utils.jsonize(self, ignore=["icon_path"])
 
     def to_file(
         self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs
@@ -499,7 +500,10 @@ class Report:
 
         fields = utils.unjsonize(cls, obj)
         for dt_field in cls._DATETIME_FIELDS:
-            fields[dt_field] = DateTime, pendulum.parser.parse(fields[dt_field])
+            fields[dt_field] = pendulum.parser.parse(fields[dt_field])
+        fields["item_details"] = {
+            k: ItemDetail.from_json(v) for k, v in fields["item_details"].items()
+        }
         return cls(**fields)
 
     def to_json(self) -> utils.JsonObject:
@@ -572,14 +576,19 @@ class Cache:
         self, session: asks.Session, item_data: Mapping[ItemID, ItemData]
     ) -> None:
         missing_ids = item_data.keys() - self.images.keys()
-        urls = {yarl.URL(item_data[id_]["icon"]): id_ for id_ in missing_ids}
+        urls = {
+            (url := yarl.URL(item_data[id_]["icon"])): (self.dir / url.name).with_stem(
+                id_
+            )
+            for id_ in missing_ids
+        }
 
         # deferred import to avoid circular dependency
         from gw2_tracker import gw2_api
 
-        downloads = await gw2_api.download_images(session, list(urls.keys()), self.dir)
+        downloads = await gw2_api.download_images(session, urls)
 
-        self.images.update({urls[url]: path for url, path in downloads.items()})
+        self.images.update({ItemID(path.stem): path for path in downloads.values()})
 
     def get_image(self, item_id: ItemID) -> None | Path:
         return self.images.get(item_id)

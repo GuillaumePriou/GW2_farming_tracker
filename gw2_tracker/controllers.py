@@ -217,8 +217,9 @@ class Controller:
                     id=id_,
                     name=item_data[id_]["name"],
                     vendor_value=item_data[id_]["vendor_value"],
-                    highest_buy=prices[id_][0],
-                    lowest_sell=prices[id_][0],
+                    highest_buy=prices.get(id_, (None, None))[0],
+                    lowest_sell=prices.get(id_, (None, None))[1],
+                    icon_path=self.cache.get_image(id_),
                 )
                 for id_ in inv_diff.keys()
             }

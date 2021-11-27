@@ -60,6 +60,7 @@ _URLS: Final[utils.SimpleNamespace[yarl.URL]] = utils.SimpleNamespace(
 )
 
 _HTTP_OK: Final[int] = 200
+_HTTP_PARTIAL: Final[int] = 206
 _FLAG_NO_SELL: Final[str] = "NoSell"
 
 
@@ -242,7 +243,7 @@ async def call_api(
     if key is not None:
         headers = _get_headers(key)
     response = await session.get(str(url), headers=headers)
-    if response.status_code == _HTTP_OK:
+    if response.status_code in (_HTTP_OK, _HTTP_PARTIAL):
         return response.json()
     else:
         raise GW2APIError(f"Could not reach {url}: {response}")
@@ -360,19 +361,17 @@ async def get_items_data(
 
 
 async def download_images(
-    session: asks.Session, urls: list[yarl.URL], target_dir: Path
+    session: asks.Session, urls: Mapping[yarl.URL, Path]
 ) -> dict[yarl.URL, Path]:
-    target_dir.mkdir(parents=True, exist_ok=True)
 
     result: dict[yarl.URL, Path] = {}
 
     async def download_image(
         session: asks.Session,
         url: yarl.URL,
-        target_dir: Path,
+        path: Path,
         result: dict[yarl.URL, Path],
     ):
-        path = target_dir / url.name
         r = await session.get(str(url), stream=True)
         async with await trio.open_file(path, "wb") as file:
             async with r.body as content:
@@ -381,8 +380,8 @@ async def download_images(
         result[url] = path
 
     async with trio.open_nursery() as nursery:
-        for url in urls:
-            nursery.start_soon(download_image, session, url, target_dir, result)
+        for url, path in urls.items():
+            nursery.start_soon(download_image, session, url, path, result)
 
     return result
 
