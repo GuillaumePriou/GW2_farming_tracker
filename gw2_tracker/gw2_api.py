@@ -20,10 +20,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Coroutine,
     Final,
-    Generator,
-    Iterable,
     Mapping,
     NewType,
     TypeAlias,
@@ -34,7 +31,6 @@ from typing import (
 import asks
 import attr
 import outcome
-import requests
 import trio
 import yarl
 from outcome import Error, Value
@@ -137,20 +133,6 @@ def _get_headers(key: models.APIKey) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
 
-def get_key_permissions_sync(key: models.APIKey) -> KeyPermissions | None:
-    response = requests.get(str(_URLS.KEY_INFO), headers=_get_headers(key))
-    if response.status_code != _HTTP_OK:
-        return None
-    else:
-        content = response.json()
-        permissions = content["permissions"]
-        return KeyPermissions(
-            wallet="wallet" in permissions,
-            inventories="inventories" in permissions,
-            characters="characters" in permissions,
-        )
-
-
 async def get_key_permissions(
     session: asks.Session, key: models.APIKey
 ) -> KeyPermissions:
@@ -192,15 +174,6 @@ async def validate_key(
             await callback(key, err)
         else:
             await callback(key, Value(True))  # type: ignore
-
-
-def validate_key_sync(key: models.APIKey):
-    perms = get_key_permissions_sync(key)
-    if perms is None:
-        raise InvalidAPIKeyError(key=key)
-    if not all(perms.values()):
-        missing_perms = [k for k, v in perms.items() if not v]
-        raise KeyPermissionError(key=key, missing_perms=tuple(missing_perms))
 
 
 def is_key_valide_sync(key: models.APIKey) -> bool:
@@ -384,21 +357,3 @@ async def download_images(
             nursery.start_soon(download_image, session, url, path, result)
 
     return result
-
-
-def GW2_API_handler(url, api_key=""):
-    """A function to manage calls to GW2 API.
-    Inputs:
-        - URL
-        - API key (optional, default = "")
-    Output if successful : dict containing response content (response.json())
-    Output if failure : empty string
-    """
-    headers = {"Authorization": "Bearer {}".format(api_key)}
-    response = requests.get(url, headers=headers, timeout=15)
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        return ""
-        # raise ValueError(f'Invalid request at {url} for key {api_key} : {response.status_code}')

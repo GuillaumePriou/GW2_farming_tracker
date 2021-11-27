@@ -21,9 +21,9 @@ def test_inventory_serialization(content):
         assert inv == models.Inventory.from_file(f)
 
 
-@given(st.text(printable), more_st.inventories())
-def test_snapshot_serialization(key, inventory):
-    snap = models.Snapshot(key, inventory)
+@given(st.text(printable), more_st.inventories(), more_st.inventories())
+def test_snapshot_serialization(key, inventory, wallet):
+    snap = models.Snapshot(key, inventory, wallet)
 
     assert snap == models.Snapshot.from_json(snap.to_json())
 
