@@ -695,7 +695,8 @@ class Model:
 
         if self.current_key != snapshot.key:
             raise ValueError(
-                f"Current key {self.current_key} doesn't match snapshot key {snapshot.key}"
+                f"Current key {self.current_key} "
+                f"doesn't match snapshot key {snapshot.key}"
             )
 
         self.start_snapshot = snapshot
@@ -723,7 +724,8 @@ class Model:
 
         if self.current_key != snapshot.key:
             raise ValueError(
-                f"Current key {self.current_key} doesn't match snapshot key {snapshot.key}"
+                f"Current key {self.current_key} "
+                f"doesn't match snapshot key {snapshot.key}"
             )
 
         self.end_snapshot = snapshot
@@ -752,38 +754,6 @@ class Model:
         if trio_guest is not None:
             copy = attr.evolve(self)
             trio_guest.start_soon(copy.save)
-
-    # def get_inventory_and_compare_it(self):
-    #     """
-    #     Get full inventory of an account and put it in new/updated inventory.
-    #     Then compare reference inventory with new inventory and build the report.
-    #     """
-    #     if self.applicationState in ("0 - started", "1 - got api key"):
-    #         raise ValueError("Missing key or reference inventory !")
-    #     self.newInventory.get_full_inventory(self.apiKey.keyValue)
-
-    #     self.referenceInventory.save_to_file(
-    #         "Application_data/end_inventory.txt", self.apiKey.keyValue
-    #     )
-    #     self.applicationState = "3 - got end inventory"
-    #     self.report.compare_inventories(self.referenceInventory, self.newInventory)
-
-    #     print(
-    #         f"function get inventory & compare it : report content after comparison :"
-    #     )
-    #     print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
-
-    #     self.report.get_item_details()
-
-    #     print(
-    #         f"function get inventory & compare it : report content after getting details :"
-    #     )
-    #     print(f"   self.report.itemsDetail : {self.report.itemsDetail}")
-
-    #     self.applicationState = "4 - got full report"
-
-    #     # with open("debug/new_inventory.txt", 'w') as f:
-    #     #     json.dump(self.newInventory.items, f, indent=3, ensure_ascii=False)
 
 
 @attr.mutable

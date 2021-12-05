@@ -40,7 +40,8 @@ class TkTrioHost:
     """
     Implementation of the trio host protocol for tkinter
 
-    thanks to https://github.com/richardsheridan/trio-guest/blob/master/trio_guest_tkinter.py
+    thanks to
+    https://github.com/richardsheridan/trio-guest/blob/master/trio_guest_tkinter.py
     """
 
     # TODO: determine what this should be
@@ -245,7 +246,7 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def _on_canvas_configure(self, event):
-        # from https://stackoverflow.com/questions/69547008/create-resizable-tkinter-frame-inside-of-scrollable-canvas
+        # from https://stackoverflow.com/questions/69547008/create-resizable-tkinter-frame-inside-of-scrollable-canvas # noqa: E501
         min_width = self.frame.winfo_reqwidth() + 5
         min_height = self.frame.winfo_reqheight() + 5
         if min_width < event.width:

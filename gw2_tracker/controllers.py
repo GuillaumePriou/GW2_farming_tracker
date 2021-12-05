@@ -73,7 +73,7 @@ class TrioGuest:
         # Standard call is somewhat incorrect: pur trio works, but sniffio
         # (used internally by asks) cannot detect that it is running in trio.
         # The following invocation was proposed on Gitter and works
-        ## self.nursery.start_soon(task, *args)
+        # self.nursery.start_soon(task, *args)
         self.nursery.parent_task.context.run(
             self.nursery.start_soon, self._wrap, task, *args
         )

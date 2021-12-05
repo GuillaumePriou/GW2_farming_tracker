@@ -229,19 +229,12 @@ def unjsonize(
             tp = field.type
             orig = typing.get_origin(field.type)
             args = typing.get_args(field.type)
-            # black formatter doesn't support match/case yet
-            # match field.type, orig, args:
-            #    case (
-            #        (tp, _, _)
-            #        |  (_, typing.Union | types.UnionType, [None, tp] | [tp, None])
-            #    ) if isinstance(tp, type) and hasattr(tp, "from_json"):
-            #        # simple class type annotations
-            #        fields[name] = tp.from_json(obj[name]) # type: ignore
-            if orig is typing.Union or orig is types.UnionType:
+            if orig is typing.Union or orig is types.UnionType:  # noqa: E721
                 if len(args) == 2 and type(None) in args:
                     if obj[name] is not None:
-                        # extract the type from the Optional[tp] or Union[None, tp] or None | tp
-                        tp = next(t for t in args if t is not type(None))
+                        # extract the type from the Optional[tp] or Union[None, tp]
+                        # or None | tp
+                        tp = next(t for t in args if t is not type(None))  # noqa: E721
             if isinstance(tp, type) and hasattr(tp, "from_json"):
                 fields[name] = tp.from_json(obj[name])  # type: ignore
             else:

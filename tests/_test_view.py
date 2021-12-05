@@ -15,7 +15,7 @@ if __name__ == "__main__":
     report = m.Report()
     report.totalLiquidGoldValue = 654321
     report.totalAquisitionValue = 123456
-    
+
     item_1 = dict()
     item_1['name'] = "item 1"
     item_1['id'] = "1"
@@ -24,8 +24,8 @@ if __name__ == "__main__":
     item_1["aquisition price"] = 111
     item_1['liquid gold value'] = 11111
     item_1['comment'] = "Common item 1. "
-    
-    item_2 = dict()    
+
+    item_2 = dict()
     item_2['name'] = "item 2"
     item_2['id'] = "2"
     item_2['count'] = "22"
@@ -33,10 +33,10 @@ if __name__ == "__main__":
     item_2["aquisition price"] = 222
     item_2['liquid gold value'] = 22222
     item_2['comment'] = "Common item 2. "
-    
+
     report.DetailedItemsList = [item_1,item_2]
-        
-    a = FullReportDisplay(root, report) 
+
+    a = FullReportDisplay(root, report)
     a.grid()
     """
     item = dict()

@@ -14,7 +14,6 @@ Main features :
 
 @author: Krashnark
 """
-from collections import abc
 from pathlib import Path
 from typing import (
     Any,
@@ -33,7 +32,6 @@ import attr
 import outcome
 import trio
 import yarl
-from outcome import Error, Value
 
 from gw2_tracker import models, utils
 
@@ -163,25 +161,20 @@ async def validate_key(
             outcome will be either an `Error` instance with the encountered
             error, or `Value(True)`
     """
-    perms_out: Value | Error = await outcome.acapture(get_key_permissions, session, key)
-    if isinstance(perms_out, Error):
+    perms_out: outcome.Value | outcome.Error = await outcome.acapture(
+        get_key_permissions, session, key
+    )
+    if isinstance(perms_out, outcome.Error):
         await callback(key, perms_out)
     else:
         perms: KeyPermissions = perms_out.unwrap()
         if not all(perms.values()):
             missing_perms = [k for k, v in perms.items() if not v]
-            err = Error(KeyPermissionError(key=key, missing_perms=tuple(missing_perms)))  # type: ignore
+            exc = KeyPermissionError(key=key, missing_perms=tuple(missing_perms))
+            err = outcome.Error(exc)  # type: ignore
             await callback(key, err)
         else:
-            await callback(key, Value(True))  # type: ignore
-
-
-def is_key_valide_sync(key: models.APIKey) -> bool:
-    try:
-        validate_key_sync(key)
-        return True
-    except GW2APIError:
-        return False
+            await callback(key, outcome.Value(True))  # type: ignore
 
 
 def _unwrap_slot(slot: _Slot) -> tuple[models.ItemID, int]:

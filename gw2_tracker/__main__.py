@@ -1,6 +1,11 @@
+#!/usr/bin/env python
+import sys
+
+if sys.version_info < (3, 10):
+    raise RuntimeError("GW2 tracker requires python 3.10+")
+
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 from gw2_tracker import app, utils
