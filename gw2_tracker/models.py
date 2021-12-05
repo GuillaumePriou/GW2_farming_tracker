@@ -1,14 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model layer of GW2 tool to evaluate gold earnings.
-
-Main features :
-    - set API key (Model.apiKey)
-    - get inventory and define it as reference
-    - get inventory and compare it to the reference
-    - generates full report for user
-
-@author: Krashnark
+Various data classes that make up the data model of the GW2 tracker app.
 """
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+"""
+Various non-specific utilities used in the GW2 tracker codebase
+"""
 from __future__ import annotations
 
 import functools

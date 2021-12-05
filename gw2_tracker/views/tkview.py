@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-View layer of GW2 tool to evaluate gold earnings.
+Tkinter view for GW2 tracker app
 
-@author: Krashnark
+This modules uses the tkinter builtin module to implement the view protocol
+required by the GW2 tracker app (see the ``gw2_tracker.protocol`` module).
 """
 from __future__ import annotations
 

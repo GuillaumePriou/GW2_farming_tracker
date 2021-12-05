@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+"""
+Main entry-point of the GW2 tracker app
+
+This module is executable using the ``-m`` python flag, and implements a
+``main`` function that is the app entry-point.
+"""
 import sys
 
 if sys.version_info < (3, 10):

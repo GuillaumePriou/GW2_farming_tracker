@@ -1,4 +1,13 @@
 # -*- coding: utf-8 -*-
+"""
+GW2 tracker application
+
+The application object initializes the model, controller and view and starts
+the event loops. The GW2 tracker app runs to event loops simultaneously: the
+UI event loop and the Trio event loop. Trio is run in guest mode inside the
+UI event loop, which must provide a specific API for doing so. See the
+``gw2_tracker.protocols`` module for the necessary API.
+"""
 import logging
 from pathlib import Path
 

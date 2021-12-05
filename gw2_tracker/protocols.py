@@ -1,7 +1,10 @@
 """
-Module containing protocols used for typechecking
+Module describing the protocols used in the GW2 tracker app.
 
-This module also provide a sort of specification
+This serves two purpose: allowing type-checking the view and the controller
+implementations, with are mutually-dependant, without introducing circular
+imports; and describing the protocols and API another View implementation
+must provide.
 """
 from __future__ import annotations
 

@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-:
 """
-View layer of GW2 tool to evaluate gold earnings.
+GW2 tracker app controller implementation
 
-@author: Krashnark
+The controller implements the controller protocol required by the GW2 tracker
+app. See the ``gw2_tracker.protocols`` module for the protocol. The controller
+also starts and uses the trio event loop.
 """
 
 import logging

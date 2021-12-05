@@ -1,18 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Simple package containing just a function to call the GW2 API.
+Helper module for calling the Guild Wars 2 API.
 
-That is all. Dependency : requests library.
-
-@author: Krashnark
-
-Simple package for defining an API key behavior
-
-Main features :
-    - Check API key validity (including permissions)
-    - Save/load API key from a file
-
-@author: Krashnark
+Most functions in this module are asynchronous and use ``trio`` and ``asks``
+for asynchronous HTTP request.
 """
 from pathlib import Path
 from typing import (
