@@ -49,10 +49,15 @@ PYI_ARGS = '--add-data "gw2_tracker/assets/*:gw2_tracker/assets"'
 [tool.taskipy.tasks]
 format.help = "Reformat the code using black and isort"
 format.cmd = "isort {SRC_DIR} {TEST_DIR} && black {SRC_DIR} {TEST_DIR}"
-lint.help = "Lint code with flake9"
-lint.cmd = "flake8 {SRC_DIR} {TEST_DIR}"
-test.help = "run all tests"
+lint_isort = "isort --check {SRC_DIR} {TEST_DIR"
+lint_black = "black --check {SRC_DIR} {TEST_DIR}"
+lint_flake8 = "flake8 {SRC_DIR} {TEST_DIR}"
+lint.help = "Lint code with isort, black and flake9"
+lint.cmd = "task lint_isort && task lint_black && task lint_flake8"
+test.help = "Run all tests"
 test.cmd = "pytest"
+checks.help = "Perform all checks"
+checks.cmd = "task lint && task typecheck && task test"
 build.help = "Build a bundled zip for the application using PyInstaller"
 build.cmd = "python build_script.py --distpath {DIST_DIR} {SRC_DIR} {PYI_ARGS} {PYI_FLAGS} --workpath {BUILD_DIR}"
 
