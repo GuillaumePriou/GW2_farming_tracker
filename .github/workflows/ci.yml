@@ -18,7 +18,8 @@ jobs:
       - name: setup python
         uses: actions/setup-python@v2.3.1
         with:
-          python-version: 3.10
+          python-version: 3.10.0
+          architecture: x64
       - name: setup poetry
         uses: Gr1N/setup-poetry@v7
       - run: poetry run task lint
