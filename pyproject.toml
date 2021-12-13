@@ -49,7 +49,7 @@ PYI_ARGS = '--add-data "gw2_tracker/assets/*:gw2_tracker/assets"'
 [tool.taskipy.tasks]
 format.help = "Reformat the code using black and isort"
 format.cmd = "isort {SRC_DIR} {TEST_DIR} && black {SRC_DIR} {TEST_DIR}"
-lint_isort = "isort --check {SRC_DIR} {TEST_DIR"
+lint_isort = "isort --check {SRC_DIR} {TEST_DIR}"
 lint_black = "black --check {SRC_DIR} {TEST_DIR}"
 lint_flake8 = "flake8 {SRC_DIR} {TEST_DIR}"
 lint.help = "Lint code with isort, black and flake9"
