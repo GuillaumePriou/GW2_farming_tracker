@@ -30,6 +30,7 @@ jobs:
         run: npm install -g pyright
       - name: Setup poetry
         uses: Gr1N/setup-poetry@v7
-      - name: install package
+      - name: Install dependencies and project
         run: poetry install
-      - run: poetry run task checks
+      - name: Run all checks
+        run: poetry run task checks
