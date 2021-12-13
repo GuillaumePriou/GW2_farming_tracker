@@ -1,4 +1,4 @@
-# GW2_farming_tracker_tool
+# GW2 tracker tool
 A small software to precisely evaluate how many gold pieces a user is making during a play session.
 
 Usage : 

@@ -1,0 +1,61 @@
+[tool.poetry]
+name = "gw2_tracker"
+version = "0.1.0"
+description = ""
+authors = ["Krashnark", "Quentin Soubeyran"]
+include = ["assets/"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+Pillow = "^8.4.0"
+pendulum = "^2.1.2"
+attrs = "^21.2.0"
+trio = "^0.19.0"
+asks = "^2.4.12"
+outcome = "^1.1.0"
+yarl = "^1.7.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.2.5"
+black = "^21.10b0"
+isort = "^5.10.1"
+pylint = "^2.11.1"
+hypothesis = "^6.24.3"
+pyinstaller = { version = "^4.7", python = "~3.10" }
+flake9 = "^3.8.3"
+taskipy = "^1.9.0"
+
+[tool.poetry.scripts]
+gw2_tracker = 'gw2_tracker.__main__:main'
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 95
+extend-ignore = "E203"
+
+[tool.taskipy.settings]
+use_vars = true
+
+[tool.taskipy.variables]
+SRC_DIR = "gw2_tracker"
+TEST_DIR = "tests"
+BUILD_DIR = "build"
+DIST_DIR = "dist"
+PYI_FLAGS = '--clean --onedir --noconfirm'
+PYI_ARGS = '--add-data "gw2_tracker/assets/*:gw2_tracker/assets"'
+
+[tool.taskipy.tasks]
+format.help = "Reformat the code using black and isort"
+format.cmd = "isort {SRC_DIR} {TEST_DIR} && black {SRC_DIR} {TEST_DIR}"
+lint.help = "Lint code with flake9"
+lint.cmd = "flake8 {SRC_DIR} {TEST_DIR}"
+test.help = "run all tests"
+test.cmd = "pytest"
+build.help = "Build a bundled zip for the application using PyInstaller"
+build.cmd = "python build_script.py --distpath {DIST_DIR} {SRC_DIR} {PYI_ARGS} {PYI_FLAGS} --workpath {BUILD_DIR}"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
