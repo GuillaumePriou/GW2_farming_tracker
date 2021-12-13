@@ -17,13 +17,18 @@ jobs:
       github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: setup python
+      - name: Checkout source code
+        uses: actions/checkout@v2
+      - name: Setup python
         uses: actions/setup-python@v2.3.1
         with:
           python-version: 3.10.0
           architecture: x64
-      - name: setup poetry
+      - name: Setup node
+        uses: actions/setup-node@v2.5.0
+      - name: Setup pyright
+        run: npm install -g pyright
+      - name: Setup poetry
         uses: Gr1N/setup-poetry@v7
       - name: install package
         run: poetry install
