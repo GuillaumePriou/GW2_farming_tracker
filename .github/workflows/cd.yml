@@ -3,7 +3,6 @@ name: CD
 
 on:
   push:
-    branches: [ main ]
     tags: [ 'v**' ]
 
 jobs:
@@ -13,7 +12,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v2
       - name: Setup
-        uses: ./.github/actions/setup@master
+        uses: ./.github/actions/setup
         with:
           python_version: 3.10.0
       - name: Run all checks
