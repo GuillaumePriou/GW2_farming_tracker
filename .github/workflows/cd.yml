@@ -1,0 +1,55 @@
+name: CD
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+jobs:
+  Checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v2
+      - name: Setup
+        uses: ./.github/actions/setup@master
+        with:
+          python_version: 3.10.0
+      - name: Run all checks
+        run: poetry run task checks
+  
+  Build:
+    needs: checks
+    strategy:
+      matrix:
+            os: [ubuntu-latest, windows-latest, macos-latest]
+    name: ${{ 'Build ' + matrix.os }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v2
+      - name: Setup
+        uses: ./.github/actions/setup@master
+        with:
+          python_version: 3.10.0
+      - name: Build
+        uses: poetry run task build
+      - name: Upload builds
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ 'build-' + matrix.os }}
+          path: ./dist/*.zip
+  
+  Release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get builds
+        uses: actions/download-artifact@v2
+        with:
+          path: ./dist
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: ./dist/*.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
