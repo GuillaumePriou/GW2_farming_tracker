@@ -18,7 +18,9 @@ runs:
       uses: actions/setup-node@v2.5.0
     - name: Setup pyright
       run: npm install -g pyright
+      shell: bash
     - name: Setup poetry
       uses: Gr1N/setup-poetry@v7
     - name: Install dependencies and project
       run: poetry install
+      shell: bash
