@@ -1,0 +1,24 @@
+name: "Setup"
+description: "Setup necessary components"
+
+inputs:
+  python_version:
+    description: "Version of python to install"
+    required: true
+  
+runs:
+  using: "composite"
+  steps:
+    - name: Setup python
+      uses: actions/setup-python@v2.3.1
+      with:
+        python-version: ${{inputs.python_version}}
+        architecture: x64
+    - name: Setup node
+      uses: actions/setup-node@v2.5.0
+    - name: Setup pyright
+      run: npm install -g pyright
+    - name: Setup poetry
+      uses: Gr1N/setup-poetry@v7
+    - name: Install dependencies and project
+      run: poetry install
