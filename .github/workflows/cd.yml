@@ -3,10 +3,8 @@ name: CD
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - v*
+    branches: [ main ]
+    tags: [ 'v**' ]
 
 jobs:
   Checks:
@@ -22,7 +20,7 @@ jobs:
         run: poetry run task checks
   
   Build:
-    needs: checks
+    needs: Checks
     strategy:
       matrix:
             os: [ubuntu-latest, windows-latest, macos-latest]
@@ -44,7 +42,7 @@ jobs:
           path: ./dist/*.zip
   
   Release:
-    needs: build
+    needs: Build
     runs-on: ubuntu-latest
     steps:
       - name: Get builds
