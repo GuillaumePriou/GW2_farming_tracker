@@ -4,9 +4,11 @@ name: CD
 on:
   push:
     tags: [ 'v**' ]
+  workflow_dispatch:
 
 jobs:
-  Checks:
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
@@ -18,8 +20,9 @@ jobs:
       - name: Run all checks
         run: poetry run task checks
   
-  Build:
-    needs: Checks
+  build:
+    name: Builds
+    needs: checks
     strategy:
       matrix:
             os: [ubuntu-latest, windows-latest, macos-latest]
@@ -40,8 +43,9 @@ jobs:
           name: ${{ 'build-' + matrix.os }}
           path: ./dist/*.zip
   
-  Release:
-    needs: Build
+  release:
+    name: Release
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Get builds
