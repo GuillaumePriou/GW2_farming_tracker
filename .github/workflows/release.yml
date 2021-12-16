@@ -20,9 +20,8 @@ jobs:
         run: poetry run task checks
   
   build-unix:
-    name: Build - Unix
+    name: "Build - Unix"
     needs: checks
-    name: "Build Unix"
     runs-on: 'ubuntu-latest'
     steps:
       - name: Checkout source code
@@ -34,13 +33,13 @@ jobs:
       - name: Build
         uses: poetry run task build
       - name: Upload builds
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.3.1
         with:
           name: build-unix
           path: ./dist/*.zip
   
   build-macos:
-    name: Build - MacOS
+    name: "Build - MacOS"
     needs: checks
     runs-on: macos-latest
     steps:
@@ -53,13 +52,13 @@ jobs:
       - name: Build
         uses: poetry run task build
       - name: Upload builds
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.3.1
         with:
           name: build-macos
           path: ./dist/*.zip
   
   build-win:
-    name: Build - Windows
+    name: "Build - Windows"
     needs: checks
     runs-on: windows-latest
     steps:
@@ -72,7 +71,7 @@ jobs:
       - name: Build
         uses: poetry run task build
       - name: Upload builds
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.3.1
         with:
           name: build-win
           path: ./dist/*.zip
@@ -83,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get builds
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v2.1.0
         with:
           path: ./dist
       - name: Create Release
