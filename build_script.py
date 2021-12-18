@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import platform
 import shutil
 from importlib import metadata
@@ -32,7 +33,7 @@ def clean(distpath: Path, name: str):
     bundle = distpath / name
     LOGGER.info("checking for %s", bundle)
     if bundle.exists():
-        LOGGER.info("celeting %s", bundle)
+        LOGGER.info("deleting %s", bundle)
         if bundle.is_file():
             bundle.unlink()
         elif bundle.is_dir():
@@ -65,6 +66,7 @@ def bundle(distpath: Path, name: str, args: list[str], main: Path):
     """
     LOGGER.info("bundling %s to %s with PyInstaller...", main, name)
     args = ["--distpath", str(distpath), "--name", str(name), *args, str(main)]
+    print(args)
     __main__.run(args)
     LOGGER.info("Done bundling %s", name)
 
@@ -122,7 +124,7 @@ def main(package: Path, main: Path, distpath: Path, args: list[str]):
     LOGGER.info("done building %s", name)
 
 
-def check_kwargs(
+def check_arguments(
     parser: argparse.ArgumentParser, kwargs: dict[str, Any]
 ) -> dict[str, Any]:
     """
@@ -135,6 +137,7 @@ def check_kwargs(
     Returns:
         kwargs: Cleaned arguments
     """
+    # Check the compiled package was correctly specified
     package: Path = kwargs["package"]
     if not package.is_dir():
         parser.error(f"{package} is not a directory")
@@ -146,7 +149,15 @@ def check_kwargs(
         parser.error(f"{main} is not a python file")
     kwargs["main"] = main
 
-    kwargs["args"] = kwargs.pop("...")
+    # Convert --add-data to plateform specific syntax
+    add_data = [
+        part
+        for data in kwargs.pop("add_data")
+        for part in ["--add-data", os.pathsep.join(data.split(":"))]
+    ]
+
+    # Rename additional args, adds data
+    kwargs["args"] = kwargs.pop("...") + add_data
 
     return kwargs
 
@@ -199,9 +210,23 @@ if __name__ == "__main__":
             "wrapper for zipping the resulting directory."
         ),
     )
+    pyinstaller_group.add_argument(
+        "--add-data",
+        action="append",
+        default=[],
+        metavar="<SRC:DEST>",
+        help=(
+            "See --add-data from PyInstaller's help message below. This argument"
+            "must be provided with a ':' separator. This script will convert it"
+            "to plateform-specific format and pass it to pyinstaller. This allows"
+            "for a unified syntax which can be called on all plateforms"
+        ),
+    )
     # Catch all remaining args
     pyinstaller_group.add_argument(
-        "...", nargs=argparse.REMAINDER, help="Additional arguments to PyInstaller"
+        "...",
+        nargs=argparse.REMAINDER,
+        help="Additional arguments to PyInstaller",
     )
 
     # Add PyInstaller own help message at the end to provide complete doc
@@ -220,4 +245,4 @@ if __name__ == "__main__":
 
     # Parse args and run
     kwargs = vars(parser.parse_args())
-    main(**check_kwargs(parser, kwargs))
+    main(**check_arguments(parser, kwargs))
