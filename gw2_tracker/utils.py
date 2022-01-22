@@ -63,7 +63,7 @@ def autoformat(cls: Cls, /, params: str | Iterable[str] = ("message", "msg")) ->
     ...
 
 
-def autoformat(cls, /, params=("message", "msg")):
+def autoformat(cls=None, /, params=("message", "msg")):
     """
     Class decorator to autoformat string arguments in the __init__ method
 
@@ -118,10 +118,12 @@ def autoformat(cls, /, params=("message", "msg")):
 
     if cls is None:
         return decorator
-    elif isinstance(cls, type):
+    elif issubclass(type(cls), type):
         return decorator(cls)
     else:
-        raise TypeError(f"@autoformat is a class decorator, cannot decorate {cls}")
+        raise TypeError(
+            f"@autoformat is a class decorator, cannot decorate {cls} which is not a class"
+        )
 
 
 def jsonize(inst, *, ignore: abc.Container[str] = ()) -> dict[str, Any]:

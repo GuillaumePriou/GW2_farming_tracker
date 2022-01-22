@@ -39,22 +39,29 @@ extend-ignore = "E203"
 use_vars = true
 
 [tool.taskipy.variables]
-SRC_DIR = "gw2_tracker"
-TEST_DIR = "tests"
+LINTED = "gw2_tracker tests build_script.py"
 BUILD_DIR = "build"
 DIST_DIR = "dist"
+SRC_DIR = "gw2_tracker"
 PYI_FLAGS = '--clean --onedir --noconfirm'
-PYI_ARGS = '--add-data "gw2_tracker/assets/*:gw2_tracker/assets"'
+PYI_DATA = '"gw2_tracker/assets/*:gw2_tracker/assets"'
 
 [tool.taskipy.tasks]
 format.help = "Reformat the code using black and isort"
-format.cmd = "isort {SRC_DIR} {TEST_DIR} && black {SRC_DIR} {TEST_DIR}"
-lint.help = "Lint code with flake9"
-lint.cmd = "flake8 {SRC_DIR} {TEST_DIR}"
-test.help = "run all tests"
+format.cmd = "isort {LINTED} && black {LINTED}"
+lint_isort = "isort --check {LINTED}"
+lint_black = "black --check {LINTED}"
+lint_flake8 = "flake8 {LINTED}"
+lint.help = "Lint code with isort, black and flake9"
+lint.cmd = "task lint_isort && task lint_black && task lint_flake8"
+typecheck.help = "Typecheck the codebase with pyright. Needs a pyright install"
+typecheck.cmd = "pyright --lib {LINTED}"
+test.help = "Run all tests"
 test.cmd = "pytest"
+checks.help = "Perform all checks"
+checks.cmd = "task lint && task typecheck && task test"
 build.help = "Build a bundled zip for the application using PyInstaller"
-build.cmd = "python build_script.py --distpath {DIST_DIR} {SRC_DIR} {PYI_ARGS} {PYI_FLAGS} --workpath {BUILD_DIR}"
+build.cmd = "python build_script.py --distpath {DIST_DIR} --add-data {PYI_DATA} {SRC_DIR} {PYI_FLAGS} --workpath {BUILD_DIR}"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
