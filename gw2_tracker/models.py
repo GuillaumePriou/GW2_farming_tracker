@@ -4,7 +4,6 @@ Various data classes that make up the data model of the GW2 tracker app.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
 
 import enum
 import functools
@@ -566,7 +565,7 @@ class Cache:
     def from_dir(cls, dir: Path) -> Cache:
         if not dir.is_dir():
             raise NotADirectoryError(f"{dir}")
-        
+
         filepath = dir / "item_data.json"
         if filepath.is_file():
             with filepath.open("rt", encoding="utf-8") as file:
@@ -594,29 +593,20 @@ class Cache:
 
         downloads = await gw2_api.download_images(session, urls)
 
-        self.images.update({
-            ItemID(path.stem): path
-            for path in downloads.values()
-        })
-        self.item_data.update({
-            id_: data
-            for id_, data in item_data.items()
-            if id_ in missing_ids
-        })
+        self.images.update({ItemID(path.stem): path for path in downloads.values()})
+        self.item_data.update(
+            {id_: data for id_, data in item_data.items() if id_ in missing_ids}
+        )
         with open(self.dir / "item_data.json", "wt", encoding="utf-8") as file:
             json.dump(self.item_data, file)
-    
+
     async def ensure_cached_icons(self, session: asks.Session, ids: Iterable[ItemID]):
         ids = set(ids) - self.images.keys()
-        item_data = {
-            id_: self.item_data[id_]
-            for id_ in  ids
-            if id_ in self.item_data
-        }
-        if (missing_ids := (ids - item_data.keys())):
+        item_data = {id_: self.item_data[id_] for id_ in ids if id_ in self.item_data}
+        if missing_ids := (ids - item_data.keys()):
             # deferred import to avoid circular dependency
             from gw2_tracker import gw2_api
-            
+
             # Fetch missing data, update cache and requested icons
             missing_data = await gw2_api.get_items_data(session, list(missing_ids))
             self.item_data.update(missing_data)

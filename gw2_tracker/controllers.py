@@ -64,7 +64,8 @@ class TrioGuest:
                 nursery.start_soon(task, *args)
         except Exception as err:
             LOGGER.error(
-                "!! Scheduled trio task crashed !! Rescued the trio loop, error was:", exc_info=err
+                "!! Scheduled trio task crashed !! Rescued the trio loop, error was:",
+                exc_info=err,
             )
 
     def start_soon(
@@ -107,7 +108,7 @@ class Controller:
 
         if self.model.state in _MESSAGES:
             self.view.display_message(_MESSAGES[self.model.state])
-        
+
     async def _display_report(self):
         if self.model.report is not None:
             item_ids = self.model.report.item_details.keys()

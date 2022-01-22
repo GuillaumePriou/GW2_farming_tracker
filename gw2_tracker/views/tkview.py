@@ -14,7 +14,16 @@ import tkinter as tk
 from importlib import abc, resources
 from pathlib import Path
 from tkinter import ttk
-from typing import Any, Callable, ClassVar, Concatenate, Generic, Optional, ParamSpec, TypeVar
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Concatenate,
+    Generic,
+    Optional,
+    ParamSpec,
+    TypeVar,
+)
 
 import attr
 import outcome
@@ -159,7 +168,6 @@ class ScrollableFrame:
     vertical_scrollbar: AutoScrollbar
     horizontal_scrollbar: AutoScrollbar
     canvas: tk.Canvas
-    
 
     def __init__(
         self,
@@ -202,25 +210,31 @@ class ScrollableFrame:
 
         # Create inner frame inside the canvas
         self.inner = ttk.Frame(self.canvas, **kwargs)
-        self.canvas.create_window(0, 0, anchor="nw", window=self.inner, tags=["canvas_frame"])
+        self.canvas.create_window(
+            0, 0, anchor="nw", window=self.inner, tags=["canvas_frame"]
+        )
 
         self.inner.bind("<Configure>", self._resize)
         self.canvas.bind("<Configure>", self._resize)
-    
+
     def _resize(self, event=None):
         # https://stackoverflow.com/questions/69547008/create-resizable-tkinter-frame-inside-of-scrollable-canvas # noqa: E501
         min_width = self.inner.winfo_reqwidth() + 5
         min_height = self.inner.winfo_reqheight() + 5
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
-        self.canvas.itemconfigure("canvas_frame", width=max(min_width, canvas_width), height=max(min_height, canvas_height))
+        self.canvas.itemconfigure(
+            "canvas_frame",
+            width=max(min_width, canvas_width),
+            height=max(min_height, canvas_height),
+        )
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def add_widget(
         self,
         cls: Callable[Concatenate[Parent, P], Widget],
         *args: P.args,
-        **kwargs: P.kwargs
+        **kwargs: P.kwargs,
     ) -> Widget:
         """
         Create a widget within this scrollable frame
@@ -395,7 +409,9 @@ class ReportDetailsWidget(ttk.Frame):
                 widget.grid(row=self.row, column=col + offset)
                 setattr(self, field, widget)
 
-        async def update(self, icon_path: Optional[Path], item_detail: models.ItemDetail, count: int) -> None:
+        async def update(
+            self, icon_path: Optional[Path], item_detail: models.ItemDetail, count: int
+        ) -> None:
             if icon_path is not None:
                 self.icon.configure(image=self._get_icon(icon_path))
             else:
@@ -435,7 +451,9 @@ class ReportDetailsWidget(ttk.Frame):
         # Legends for the details
         legends = []
         for col, legend in enumerate(self._LEGENDS):
-            widget = self.scrollable_frame.add_widget(ttk.Label, text=legend, font="bold", justify="center")
+            widget = self.scrollable_frame.add_widget(
+                ttk.Label, text=legend, font="bold", justify="center"
+            )
             widget.grid(row=0, column=col + 1)
             self.scrollable_frame.inner.columnconfigure(col + 1, weight=1, pad=15)
             legends.append(widget)
