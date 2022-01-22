@@ -174,15 +174,12 @@ def _unwrap_slot(slot: _Slot) -> tuple[models.ItemID, int]:
 
     If the slot is None, return ("", 0)
     """
-    if not slot:
-        raise ValueError(f"Invalid slot: <{slot}>")
-    for k in ("charges", "count", "value"):
-        if k in slot:
-            count = slot[k]
-            break
-    else:
-        raise ValueError(f"Invalid slot: <{slot}>")
-    return models.ItemID(str(slot["id"])), count
+    if slot:
+        for k in ("charges", "count", "value"):
+            if k in slot:
+                count = slot[k]
+                return models.ItemID(str(slot["id"])), count
+    raise ValueError(f"Invalid slot: <{slot}>")
 
 
 def _slots_to_dict(slots: list[_Slot]) -> dict[models.ItemID, int]:

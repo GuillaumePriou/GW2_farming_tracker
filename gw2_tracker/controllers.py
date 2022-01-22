@@ -64,7 +64,8 @@ class TrioGuest:
                 nursery.start_soon(task, *args)
         except Exception as err:
             LOGGER.error(
-                "!! Scheduled trio task crashed !! Rescued the trio loop", exc_info=err
+                "!! Scheduled trio task crashed !! Rescued the trio loop, error was:",
+                exc_info=err,
             )
 
     def start_soon(
@@ -72,7 +73,7 @@ class TrioGuest:
     ) -> None:
         if kwargs:
             raise RuntimeError("trio.Nursery.start_soon doesn't support kwargs")
-        # Standard call is somewhat incorrect: pur trio works, but sniffio
+        # Standard call is somewhat incorrect: pure trio works, but sniffio
         # (used internally by asks) cannot detect that it is running in trio.
         # The following invocation was proposed on Gitter and works
         # self.nursery.start_soon(task, *args)
@@ -98,12 +99,24 @@ class Controller:
     def _update_view(self):
         if self.model.state >= models.States.KEY:
             self.view.enable_get_start_snapshot()
+
         if self.model.state >= models.States.SNAP_START:
             self.view.enable_compute_gains()
+
         if self.model.state >= models.States.REPORT and self.model.report is not None:
-            self.trio_guest.start_soon(self.view.display_report, self.model.report)
+            self.trio_guest.start_soon(self._display_report)
+
         if self.model.state in _MESSAGES:
             self.view.display_message(_MESSAGES[self.model.state])
+
+    async def _display_report(self):
+        if self.model.report is not None:
+            item_ids = self.model.report.item_details.keys()
+            # Update the cache if necessary
+            await self.cache.ensure_cached_icons(self.trio_guest.session, item_ids)
+
+            # update the view
+            await self.view.display_report(self.model.report, self.cache)
 
     def start_trio_guest(self, host: protocols.TrioHostProto) -> None:
         if self.trio_guest.host is not None:
@@ -116,11 +129,12 @@ class Controller:
         self.trio_guest.run_in(host)
 
     def on_ui_start(self) -> None:
-        # refresh the view on startup, once every event loop is started
+        # refresh the view on startup, once all event loops are started
         # and available
         LOGGER.debug("Startup view refresh !")
         if self.model.current_key is not None:
             self.view.display_key(self.model.current_key)
+
         self._update_view()
 
     def close_app(self):
@@ -221,7 +235,6 @@ class Controller:
                     vendor_value=item_data[id_]["vendor_value"],
                     highest_buy=prices.get(id_, (None, None))[0],
                     lowest_sell=prices.get(id_, (None, None))[1],
-                    icon_path=self.cache.get_image(id_),
                 )
                 for id_ in inv_diff.keys()
             }
@@ -236,7 +249,7 @@ class Controller:
 
             LOGGER.info("Displaying report...")
             self.view.display_message("Displaying report...")
-            await self.view.display_report(report)
+            await self.view.display_report(report, self.cache)
 
             LOGGER.info("done")
             self.view.display_message("Report is displayed bellow")

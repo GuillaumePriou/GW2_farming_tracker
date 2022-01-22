@@ -314,7 +314,6 @@ class ItemDetail:
     vendor_value: int
     highest_buy: None | int
     lowest_sell: None | int
-    icon_path: None | Path = None
 
     @classmethod
     def from_file(cls, file: str | Path | IO[bytes] | IO[str]) -> ItemDetail:
@@ -356,12 +355,12 @@ class ItemDetail:
         if not isinstance(obj, dict):
             raise ValueError(f"expected a JSON object, got {obj}")
 
-        fields = utils.unjsonize(cls, obj, ignore=["icon_path"])
+        fields = utils.unjsonize(cls, obj)
         return cls(**fields)
 
     def to_json(self) -> utils.JsonObject:
         """Serialize the instance to JSON"""
-        return utils.jsonize(self, ignore=["icon_path"])
+        return utils.jsonize(self)
 
     def to_file(
         self, file: str | Path | IO[str], indent=4, sort_keys=True, **kwargs
@@ -500,9 +499,13 @@ class Report:
 
     def to_json(self) -> utils.JsonObject:
         """Serialize the instance to JSON"""
-        fields = utils.jsonize(self)
+        fields = utils.jsonize(self, ignore=["item_details"])
         for dt_field in self._DATETIME_FIELDS:
             fields[dt_field] = fields[dt_field].isoformat()
+        fields["item_details"] = {
+            item_id: item_detail.to_json()
+            for item_id, item_detail in self.item_details.items()
+        }
         return fields
 
     def to_file(
@@ -552,6 +555,7 @@ class Cache:
     """
 
     dir: Path = attr.field(converter=Path)
+    item_data: dict[ItemID, ItemData] = attr.field(factory=dict)
     images: dict[ItemID, Path] = attr.field(factory=dict)
 
     def __attrs_post_init__(self):
@@ -561,8 +565,17 @@ class Cache:
     def from_dir(cls, dir: Path) -> Cache:
         if not dir.is_dir():
             raise NotADirectoryError(f"{dir}")
+
+        filepath = dir / "item_data.json"
+        if filepath.is_file():
+            with filepath.open("rt", encoding="utf-8") as file:
+                item_data = json.load(file)
+        else:
+            item_data = {}
+
         images = {ItemID(f.stem): f for f in dir.glob("*.png")}
-        return Cache(dir, images)
+
+        return Cache(dir, item_data, images)
 
     async def ensure_icons(
         self, session: asks.Session, item_data: Mapping[ItemID, ItemData]
@@ -581,6 +594,25 @@ class Cache:
         downloads = await gw2_api.download_images(session, urls)
 
         self.images.update({ItemID(path.stem): path for path in downloads.values()})
+        self.item_data.update(
+            {id_: data for id_, data in item_data.items() if id_ in missing_ids}
+        )
+        with open(self.dir / "item_data.json", "wt", encoding="utf-8") as file:
+            json.dump(self.item_data, file)
+
+    async def ensure_cached_icons(self, session: asks.Session, ids: Iterable[ItemID]):
+        ids = set(ids) - self.images.keys()
+        item_data = {id_: self.item_data[id_] for id_ in ids if id_ in self.item_data}
+        if missing_ids := (ids - item_data.keys()):
+            # deferred import to avoid circular dependency
+            from gw2_tracker import gw2_api
+
+            # Fetch missing data, update cache and requested icons
+            missing_data = await gw2_api.get_items_data(session, list(missing_ids))
+            self.item_data.update(missing_data)
+            item_data.update(missing_data)
+
+        await self.ensure_icons(session, item_data)
 
     def get_image(self, item_id: ItemID) -> None | Path:
         return self.images.get(item_id)
