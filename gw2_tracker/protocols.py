@@ -159,7 +159,7 @@ class ViewProto(Protocol):
         """Display the current used API key"""
         ...
 
-    async def display_report(self, report: models.Report) -> None:
+    async def display_report(self, report: models.Report, cache: models.Cache) -> None:
         """Display a report"""
         ...
 

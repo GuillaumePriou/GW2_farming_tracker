@@ -35,7 +35,7 @@ class GW2Tracker:
                 self.model = models.Model.from_file(model_file)
             except Exception as err:
                 LOGGER.error(
-                    f"Could not reload saved state from {model_file}, creating new one",
+                    f"Could not reload saved state from {model_file}, creating a new one",
                     exc_info=err,
                 )
         if not hasattr(self, "model"):

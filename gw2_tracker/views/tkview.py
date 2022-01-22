@@ -14,7 +14,7 @@ import tkinter as tk
 from importlib import abc, resources
 from pathlib import Path
 from tkinter import ttk
-from typing import Any, Callable, ClassVar, Concatenate, Generic, ParamSpec, TypeVar
+from typing import Any, Callable, ClassVar, Concatenate, Generic, Optional, ParamSpec, TypeVar
 
 import attr
 import outcome
@@ -34,48 +34,6 @@ ASSETS = {
 Parent = TypeVar("Parent", bound=tk.Widget)
 Widget = TypeVar("Widget", bound=tk.Widget)
 P = ParamSpec("P")
-
-
-@attr.define
-class TkTrioHost:
-    """
-    Implementation of the trio host protocol for tkinter
-
-    thanks to
-    https://github.com/richardsheridan/trio-guest/blob/master/trio_guest_tkinter.py
-    """
-
-    # TODO: determine what this should be
-    uses_signal_set_wakeup_fd: ClassVar[bool] = False
-
-    _root: tk.Tk
-    _queue: collections.deque = attr.field(factory=collections.deque, init=False)
-    _tk_func_name: str = attr.field(init=False)
-
-    def __attrs_post_init__(self):
-        self._tk_func_name = self._root.register(self._tk_func)
-
-    def _tk_func(self):
-        # call a queued func
-        self._queue.popleft()()
-
-    def run_sync_soon_threadsafe(self, func: Callable) -> None:
-        self._queue.append(func)
-        self._root.call("after", "idle", self._tk_func_name)
-
-    def run_sync_soon_not_threadsafe(self, func: Callable) -> None:
-        self._queue.append(func)
-        self._root.call("after", "idle", "after", 0, self._tk_func_name)
-
-    def done_callback(self, out: outcome.Outcome) -> None:
-        if isinstance(out, outcome.Error):
-            LOGGER.error(
-                "Trio loop raised the following exception:", exc_info=out.error
-            )
-        else:
-            LOGGER.debug(f"Trio loop cloed normally ({out})")
-        LOGGER.debug("Closing Tk event loop")
-        self._root.destroy()
 
 
 class LabeledWidget(Generic[Widget], ttk.Frame):
@@ -111,8 +69,8 @@ class LabeledWidget(Generic[Widget], ttk.Frame):
         """
         super().__init__(parent)
 
-        # Use an intermediary frame to center the label+widget
-        # without introducing space between the label and widget
+        # Use an intermediary frame with grid method to center the label
+        # and widget without introducing space between the label and widget
         self._frame = ttk.Frame(self)
         self._frame.grid(row=0, column=0, sticky="")
         self.rowconfigure(0, weight=1)
@@ -121,10 +79,8 @@ class LabeledWidget(Generic[Widget], ttk.Frame):
         self.label = ttk.Label(self._frame, text=text)
         self.widget = cls(self._frame, *args, **kwargs)
 
-        self.label.pack(side="left", ipadx=10)  # expand=True, fill="x")
-        self.widget.pack(
-            side="right",
-        )  # expand=True, fill="x")
+        self.label.pack(side="left", ipadx=10)
+        self.widget.pack(side="right")
 
 
 class Combobox(ttk.Combobox):
@@ -171,27 +127,39 @@ class AutoScrollbar(ttk.Scrollbar):
         )
 
 
-class ScrollableFrame(ttk.Frame):
+class ScrollableFrame:
     """
-    Frame automatically embedded in a Canvas with a scrollbar
+    Frame with automatic scrollbars
 
-    This widget first creates a `tk.Canvas` with an attached `ttk.Scrollbar`
-    on it before adding itself as a window of the canvas. It should make adding
-    a scrollbar to a frame transparent.
+    This frame automatically add scrollbars to scroll its content. Internally,
+    this widget create a `ttk.Frame` hosting a `tk.Canvas` and two
+    `Autoscrollbar`, and add itself as a window in the canvas. You must use
+    the pack, grid or place geometry on the canvas for this widget to be
+    displayed.
+
+    To add widget into the scrollable frame, use the ``add_widget`` method or
+    supply the "inner" attribute as the parent of the widget. Do not forget to
+    use a geometry method such as ``pack`` or ``grid`` on the ``outer`` frame
+    to make this widget visible.
 
     Parameters:
         parent: parent widget to create this frame in. This is not the actual
-            parent of this widget, see the ``canvas`` attribute.
+            parent of this widget, see the ``canvas_`` attribute.
         kwargs: other Tk arguments
 
     Attributes:
-        frame: the inner frame widget should be created in
+        outer: outer frame used to host the canvas and scrollbars
+        canvas_: Actual parent of this widget, of which this frame is a window
+        scrollbar_vertical_: the vertical `AutoScrollbar` of the canvas
+        scrollbar_horizontal_: horizontal `AutoScrollbar` of the canvas
+        inner: inner frame that host child widgets
     """
 
+    outer: ttk.Frame
     vertical_scrollbar: AutoScrollbar
     horizontal_scrollbar: AutoScrollbar
     canvas: tk.Canvas
-    frame: ttk.Frame
+    
 
     def __init__(
         self,
@@ -201,21 +169,23 @@ class ScrollableFrame(ttk.Frame):
         scrollbar_kws: dict[str, Any] = None,
         **kwargs,
     ):
-        super().__init__(parent, **kwargs)
+        # Create a Frame for storing the Canvas and scrollbars
+        self.outer = ttk.Frame(parent)
+
         # Scrollbars
         self.vertical_scrollbar = AutoScrollbar(
-            self, orient=tk.VERTICAL, **(scrollbar_kws or {})
+            self.outer, orient=tk.VERTICAL, **(scrollbar_kws or {})
         )
         self.vertical_scrollbar.grid(row=0, column=1, sticky="ns")
 
         self.horizontal_scrollbar = AutoScrollbar(
-            self, orient=tk.HORIZONTAL, **(scrollbar_kws or {})
+            self.outer, orient=tk.HORIZONTAL, **(scrollbar_kws or {})
         )
         self.horizontal_scrollbar.grid(row=1, column=0, sticky="ew")
 
         # Canvas
         self.canvas = tk.Canvas(
-            self,
+            self.outer,
             xscrollcommand=self.horizontal_scrollbar.set,
             yscrollcommand=self.vertical_scrollbar.set,
             **(canvas_kws or {}),
@@ -227,34 +197,46 @@ class ScrollableFrame(ttk.Frame):
         self.horizontal_scrollbar.config(command=self.canvas.xview)
 
         # Expandable
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        self.outer.grid_rowconfigure(0, weight=1)
+        self.outer.grid_columnconfigure(0, weight=1)
 
-        # Inner frame
-        self.frame = ttk.Frame(self.canvas)
-        self.canvas.create_window(
-            0, 0, anchor="nw", window=self.frame, tags=["canvas_frame"]
-        )
+        # Create inner frame inside the canvas
+        self.inner = ttk.Frame(self.canvas, **kwargs)
+        self.canvas.create_window(0, 0, anchor="nw", window=self.inner, tags=["canvas_frame"])
 
-        # self.frame.bind("<Configure>", self._on_frame_configure)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
-
-    def _on_frame_configure(self, event=None):
-        """
-        Adapts the canvas when the frame is resized
-        """
-        self.frame.update_idletasks()
+        self.inner.bind("<Configure>", self._resize)
+        self.canvas.bind("<Configure>", self._resize)
+    
+    def _resize(self, event=None):
+        # https://stackoverflow.com/questions/69547008/create-resizable-tkinter-frame-inside-of-scrollable-canvas # noqa: E501
+        min_width = self.inner.winfo_reqwidth() + 5
+        min_height = self.inner.winfo_reqheight() + 5
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        self.canvas.itemconfigure("canvas_frame", width=max(min_width, canvas_width), height=max(min_height, canvas_height))
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def _on_canvas_configure(self, event):
-        # from https://stackoverflow.com/questions/69547008/create-resizable-tkinter-frame-inside-of-scrollable-canvas # noqa: E501
-        min_width = self.frame.winfo_reqwidth() + 5
-        min_height = self.frame.winfo_reqheight() + 5
-        if min_width < event.width:
-            self.canvas.itemconfigure("canvas_frame", width=event.width)
-        if min_height < event.height:
-            self.canvas.itemconfigure("canvas_frame", height=event.height)
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+    def add_widget(
+        self,
+        cls: Callable[Concatenate[Parent, P], Widget],
+        *args: P.args,
+        **kwargs: P.kwargs
+    ) -> Widget:
+        """
+        Create a widget within this scrollable frame
+
+        Widget must still be displayed, this is the equivalent of creating a
+        widget from it's class constructor.
+
+        Arguments:
+            cls: class of the widget to create
+            args: additional positional arguments passed to the class
+            kwargs: additional keywords arguments passed to the class
+
+        Returns:
+            The created widget
+        """
+        return cls(self.inner, *args, **kwargs)
 
 
 class KeyInputWidget(ttk.Frame):
@@ -277,7 +259,7 @@ class KeyInputWidget(ttk.Frame):
         self.button.pack(side="left", padx=5)
 
 
-class _SingleCoinWidget(ttk.Frame):
+class SingleCoinWidget(ttk.Frame):
     """Widget displaying a value and coin icon"""
 
     IMAGE_CACHE: ClassVar[dict[abc.Traversable, tk.PhotoImage]] = {}
@@ -317,16 +299,16 @@ class _SingleCoinWidget(ttk.Frame):
 class CoinWidget(ttk.Frame):
     """Display monetary values in gold, silver and copper coins"""
 
-    copper: _SingleCoinWidget
-    silver: _SingleCoinWidget
-    gold: _SingleCoinWidget
+    copper: SingleCoinWidget
+    silver: SingleCoinWidget
+    gold: SingleCoinWidget
 
     def __init__(self, parent, amount=0):
         super().__init__(parent)
 
-        self.copper = _SingleCoinWidget(self, ASSETS["copper"])
-        self.silver = _SingleCoinWidget(self, ASSETS["silver"])
-        self.gold = _SingleCoinWidget(self, ASSETS["gold"])
+        self.copper = SingleCoinWidget(self, ASSETS["copper"])
+        self.silver = SingleCoinWidget(self, ASSETS["silver"])
+        self.gold = SingleCoinWidget(self, ASSETS["gold"])
 
         self.gold.pack(side="left")
         self.silver.pack(side="left")
@@ -374,9 +356,9 @@ class ReportDetailsWidget(ttk.Frame):
         "ID",
         "Name",
         "Amount",
-        "total value",
-        "unit black lion value",
-        "unit vendor value",
+        "Total value",
+        "Unit black lion value",
+        "Unit vendor value",
     )
 
     @attr.mutable
@@ -413,9 +395,11 @@ class ReportDetailsWidget(ttk.Frame):
                 widget.grid(row=self.row, column=col + offset)
                 setattr(self, field, widget)
 
-        async def update(self, item_detail: models.ItemDetail, count: int) -> None:
-            if item_detail.icon_path is not None:
-                self.icon.configure(image=self._get_icon(item_detail.icon_path))
+        async def update(self, icon_path: Optional[Path], item_detail: models.ItemDetail, count: int) -> None:
+            if icon_path is not None:
+                self.icon.configure(image=self._get_icon(icon_path))
+            else:
+                self.icon.configure(image="")
             self.id.configure(text=item_detail.id)
             self.name.configure(text=item_detail.name)
             self.count.configure(text=count)
@@ -445,30 +429,28 @@ class ReportDetailsWidget(ttk.Frame):
         super().__init__(parent)
 
         self.scrollable_frame = ScrollableFrame(self)
-        self.scrollable_frame.pack(side="left", expand=True, fill="both")
-        self.scrollable_frame.frame.columnconfigure(0, pad=5)
+        self.scrollable_frame.outer.pack(side="left", expand=True, fill="both")
+        self.scrollable_frame.inner.columnconfigure(0, pad=5)
 
         # Legends for the details
         legends = []
         for col, legend in enumerate(self._LEGENDS):
-            widget = ttk.Label(
-                self.scrollable_frame.frame, text=legend, font="bold", justify="center"
-            )
+            widget = self.scrollable_frame.add_widget(ttk.Label, text=legend, font="bold", justify="center")
             widget.grid(row=0, column=col + 1)
-            self.scrollable_frame.frame.columnconfigure(col + 1, weight=1, pad=15)
+            self.scrollable_frame.inner.columnconfigure(col + 1, weight=1, pad=15)
             legends.append(widget)
         self.legends = tuple(legends)
 
-        self.rows = [self._Row(self.scrollable_frame.frame, 1)]
+        self.rows = [self._Row(self.scrollable_frame.inner, 1)]
 
-    async def update(self, report: models.Report) -> None:
+    async def update(self, report: models.Report, cache: models.Cache) -> None:
         details = [report.item_details[id_] for id_ in sorted(report.inv_diff.keys())]
         counts = [report.inv_diff[detail.id] for detail in details]
 
         # First re-use rows that already exist:
         index = -1
         for index, (row, detail, count) in enumerate(zip(self.rows, details, counts)):
-            await row.update(detail, count)
+            await row.update(cache.get_image(detail.id), detail, count)
         index += 1
 
         if index < len(details):
@@ -476,14 +458,15 @@ class ReportDetailsWidget(ttk.Frame):
             for offset, (detail, count) in enumerate(
                 zip(details[index:], counts[index:])
             ):
-                row = self._Row(self.scrollable_frame.frame, index + offset + 1)
+                row = self._Row(self.scrollable_frame.inner, index + offset + 1)
                 self.rows.append(row)
-                await row.update(detail, count)
+                await row.update(cache.get_image(detail.id), detail, count)
         elif index > len(details):
             # Too many rows, destroy & drop extra ones
             for row in self.rows[index:]:
                 row.destroy()
             self.rows = self.rows[:index]
+        self.scrollable_frame._resize()
         LOGGER.debug("ReportsDetailWidget::update() finished")
 
 
@@ -526,11 +509,53 @@ class FullReportWidget(ttk.Frame):
         self.details = ReportDetailsWidget(self)
         self.details.pack(side="bottom", expand=True, fill="both")
 
-    async def update(self, report: models.Report):
+    async def update(self, report: models.Report, cache: models.Cache):
         self.coin_gain.widget.amount = report.coins
         self.total_gain.widget.amount = report.total_gains
         # Update details
-        await self.details.update(report)
+        await self.details.update(report, cache)
+
+
+@attr.define
+class TkTrioHost:
+    """
+    Implementation of the trio host protocol for tkinter
+
+    thanks to
+    https://github.com/richardsheridan/trio-guest/blob/master/trio_guest_tkinter.py
+    """
+
+    # TODO: determine what this should be
+    uses_signal_set_wakeup_fd: ClassVar[bool] = False
+
+    _root: tk.Tk
+    _queue: collections.deque = attr.field(factory=collections.deque, init=False)
+    _tk_func_name: str = attr.field(init=False)
+
+    def __attrs_post_init__(self):
+        self._tk_func_name = self._root.register(self._tk_func)
+
+    def _tk_func(self):
+        # call a queued func
+        self._queue.popleft()()
+
+    def run_sync_soon_threadsafe(self, func: Callable) -> None:
+        self._queue.append(func)
+        self._root.call("after", "idle", self._tk_func_name)
+
+    def run_sync_soon_not_threadsafe(self, func: Callable) -> None:
+        self._queue.append(func)
+        self._root.call("after", "idle", "after", 0, self._tk_func_name)
+
+    def done_callback(self, out: outcome.Outcome) -> None:
+        if isinstance(out, outcome.Error):
+            LOGGER.error(
+                "Trio loop raised the following exception:", exc_info=out.error
+            )
+        else:
+            LOGGER.debug(f"Trio loop cloed normally ({out})")
+        LOGGER.debug("Closing Tk event loop")
+        self._root.destroy()
 
 
 class TkView:
@@ -556,7 +581,7 @@ class TkView:
     def _build(self):
         self.base = ttk.Frame(self.tk_)
         self.base.pack(side="left", expand=True, fill="both")
-        # Define a big important message to help user to use the this application
+        # Define a big important message to help user use the application
         self.label_main_message = ttk.Label(
             self.base,
             text="No message",
@@ -659,5 +684,5 @@ class TkView:
     def enable_compute_gains(self) -> None:
         self.button_stop.configure(state="normal")
 
-    async def display_report(self, report: models.Report) -> None:
-        await self.widget_report.update(report)
+    async def display_report(self, report: models.Report, cache: models.Cache) -> None:
+        await self.widget_report.update(report, cache)
